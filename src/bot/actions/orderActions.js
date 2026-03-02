@@ -4,7 +4,7 @@ const userRepo = require('../../database/repositories/userRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const orderHelper = require('../../utils/orderHelper'); 
-const uiHelper = require('../../utils/uiHelper'); // GEFIXT: Fehlender Import hinzugefügt!
+const uiHelper = require('../../utils/uiHelper');
 const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
@@ -97,7 +97,8 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
-    bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
+
+    bot.action(/^oview_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -110,9 +111,7 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
         } catch (error) { console.error(error.message); }
     });
-
-    // GEFIXT: Regex so angepasst, dass er nicht mehr beim Unterstrich von "in_bearbeitung" stolpert
-    bot.action(/^ostatus_([^_]+)_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^ostatus_([a-zA-Z0-9]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             let newStatus = ctx.match[2];
@@ -122,32 +121,62 @@ module.exports = (bot) => {
             if (!order) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
 
             if (FINAL_STATUSES.includes(order.status)) {
-                return ctx.reply(`⚠️ Status ist bereits final (${order.status}). Wirklich ändern?`, {
-                    reply_markup: { inline_keyboard: [[{ text: '✅ Erzwingen', callback_data: `ostatus_force_${orderId}_${newStatus}` }], [{ text: '❌ Abbrechen', callback_data: `oview_${orderId}` }]] }
+                return uiHelper.updateOrSend(ctx, `⚠️ Status ist bereits final (${order.status}). Wirklich ändern?`, {
+                    inline_keyboard: [
+                        [{ text: '✅ Erzwingen', callback_data: `oforce_${orderId}_${newStatus}` }],
+                        [{ text: '❌ Abbrechen', callback_data: `oview_${orderId}` }]
+                    ]
                 });
             }
 
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
             await notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus);
             
-            // Benachrichtigung an Admins/Master aktualisieren (TX-ID Sync)
-            const username = ctx.from.username ? `@${ctx.from.username}` : 'Kunde';
-            notificationService.notifyAdminsTxId({
-                orderId, txId: updated.tx_id || 'Keine TX-ID',
-                username, total: formatters.formatPrice(updated.total_amount)
-            }).catch(() => {});
-
             const payload = await orderHelper.buildOrderViewPayload(updated);
             await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
             ctx.answerCbQuery(`✅ Status: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
         } catch (error) { console.error(error.message); }
     });
 
-    bot.action(/^odel_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^oforce_([a-zA-Z0-9]+)_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            const newStatus = ctx.match[2];
+            const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
+            await notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus);
+            const payload = await orderHelper.buildOrderViewPayload(updated);
+            await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
+            ctx.answerCbQuery(`✅ Status erzwungen: ${newStatus}`).catch(() => {});
+        } catch (e) { console.error(e); }
+    });
+
+    bot.action(/^odeliv_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingDigitalDelivery = orderId;
+            await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
+            });
+        } catch (error) { console.error(error.message); }
+    });
+
+    bot.action('cancel_delivery', async (ctx) => {
+        ctx.answerCbQuery('Abgebrochen').catch(() => {});
+        if (ctx.session) ctx.session.awaitingDigitalDelivery = null;
+        await ctx.reply('❌ Digitale Auslieferung abgebrochen.');
+    });
+
+    bot.action(/^odel_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         if (ctx.from.id === Number(config.MASTER_ADMIN_ID)) {
-            return ctx.reply(`⚠️ \`#${orderId}\` endgültig löschen?`, {
-                reply_markup: { inline_keyboard: [[{ text: '🗑 Löschen', callback_data: `odel_confirm_${orderId}` }], [{ text: '❌ Nein', callback_data: `oview_${orderId}` }]] }
+            return uiHelper.updateOrSend(ctx, `⚠️ \`#${orderId}\` endgültig löschen?`, {
+                inline_keyboard: [
+                    [{ text: '🗑 Endgültig löschen', callback_data: `odel_confirm_${orderId}` }],
+                    [{ text: '❌ Abbrechen', callback_data: `oview_${orderId}` }]
+                ]
             });
         }
         
@@ -160,12 +189,52 @@ module.exports = (bot) => {
         });
     });
 
+    bot.action(/^odel_confirm_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) return;
+        try {
+            const orderId = ctx.match[1];
+            await orderRepo.deleteOrder(orderId);
+            ctx.answerCbQuery('🗑 Bestellung gelöscht.').catch(() => {});
+            
+            await uiHelper.updateOrSend(ctx, `🗑 Bestellung \`#${orderId}\` wurde endgültig gelöscht.`, {
+                inline_keyboard: [[{ text: '🔙 Zurück zum Panel', callback_data: 'admin_open_orders' }]]
+            });
+        } catch (error) { console.error(error.message); }
+    });
+
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.message.text) return next();
         const input = ctx.message.text.trim();
         if (input.startsWith('/')) {
             ctx.session.awaitingTxId = null;
+            ctx.session.awaitingNote = null;
+            ctx.session.awaitingDigitalDelivery = null;
             return next();
+        }
+
+        if (ctx.session.awaitingDigitalDelivery) {
+            const orderId = ctx.session.awaitingDigitalDelivery;
+            ctx.session.awaitingDigitalDelivery = null;
+            try {
+                const order = await orderRepo.getOrderByOrderId(orderId);
+                if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
+                await orderHelper.clearOldNotifications(ctx, order);
+                const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
+                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
+                const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown' }).catch(() => null);
+                if (sentMsg) {
+                    const updated = await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+                    await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
+                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Digitale Lieferung gesendet.`);
+                    await ctx.reply(texts.getDigitalDeliverySuccess(orderId), { 
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
+                    });
+                } else {
+                    await ctx.reply(`❌ Fehler: Nachricht konnte nicht gesendet werden.`);
+                }
+            } catch (error) { console.error(error.message); }
+            return;
         }
 
         if (ctx.session.awaitingTxId) {
@@ -179,6 +248,15 @@ module.exports = (bot) => {
                 orderId, userId: ctx.from.id, txId: input, 
                 username, total: formatters.formatPrice(updated.total_amount) 
             }).catch(() => {});
+            return;
+        }
+
+        if (ctx.session.awaitingNote) {
+            const orderId = ctx.session.awaitingNote;
+            ctx.session.awaitingNote = null;
+            const author = ctx.from.username || `ID:${ctx.from.id}`;
+            await orderRepo.addAdminNote(orderId, author, input);
+            ctx.reply(texts.getNoteAdded(orderId), { parse_mode: 'Markdown' });
             return;
         }
         return next();
