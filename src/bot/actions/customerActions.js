@@ -1,5 +1,6 @@
 const orderRepo = require('../../database/repositories/orderRepo');
 const userRepo = require('../../database/repositories/userRepo');
+const feedbackRepo = require('../../database/repositories/feedbackRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const notificationService = require('../../services/notificationService');
@@ -71,6 +72,7 @@ module.exports = (bot) => {
             reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
         });
     });
+
     bot.action(/^cust_ping_(.+)$/, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -104,6 +106,46 @@ module.exports = (bot) => {
         } catch (error) {
             console.error('Contact Error:', error.message);
             ctx.answerCbQuery('⚠️ Fehler beim Starten des Kontakts.', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    bot.action('view_feedbacks', async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const feedbacks = await feedbackRepo.getApprovedFeedbacks(10);
+            let text = '';
+            
+            if (!feedbacks || feedbacks.length === 0) {
+                text = texts.getPublicFeedbacksEmpty();
+            } else {
+                text = texts.getPublicFeedbacksHeader();
+                feedbacks.forEach(fb => {
+                    const stars = '⭐'.repeat(fb.rating);
+                    const date = new Date(fb.created_at).toLocaleDateString('de-DE');
+                    text += `${stars} - *${fb.username}* (${date})\n`;
+                    if (fb.comment) text += `_"${fb.comment}"_\n`;
+                    text += `\n`;
+                });
+            }
+
+            const kb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] };
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb }).catch(async () => {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+            });
+        } catch (error) {
+            console.error('View Feedbacks Error:', error.message);
+            ctx.reply('❌ Fehler beim Laden der Feedbacks.').catch(() => {});
+        }
+    });
+
+    bot.action(/^start_feedback_(.+)$/, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            await ctx.scene.enter('feedbackScene', { orderId });
+        } catch (error) {
+            console.error('Start Feedback Error:', error.message);
+            ctx.reply('⚠️ Fehler beim Starten des Feedbacks.').catch(() => {});
         }
     });
 

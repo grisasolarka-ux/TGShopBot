@@ -1,6 +1,7 @@
 const orderRepo = require('../../database/repositories/orderRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const userRepo = require('../../database/repositories/userRepo');
+const feedbackRepo = require('../../database/repositories/feedbackRepo'); // NEUER IMPORT FÜR FEEDBACKS
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const orderHelper = require('../../utils/orderHelper'); 
@@ -201,6 +202,58 @@ module.exports = (bot) => {
                 inline_keyboard: [[{ text: '🔙 Zurück zum Panel', callback_data: 'admin_open_orders' }]]
             });
         } catch (error) { console.error(error.message); }
+    });
+
+    // NEU: Feedback-Qualifizierung abfangen
+    bot.action(/^allow_fb_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            
+            if (!order) return ctx.answerCbQuery('Bestellung nicht gefunden.', { show_alert: true });
+            if (order.feedback_invited) return ctx.answerCbQuery('Bereits für Feedback qualifiziert.', { show_alert: true });
+
+            // In DB als "eingeladen" markieren
+            await orderRepo.setFeedbackInvited(orderId, true);
+
+            // Kunde benachrichtigen
+            if (notificationService.notifyCustomerFeedbackInvite) {
+                await notificationService.notifyCustomerFeedbackInvite(order.user_id, orderId);
+            }
+
+            // Ansicht aktualisieren
+            order.feedback_invited = true;
+            const payload = await orderHelper.buildOrderViewPayload(order);
+            await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
+            
+            ctx.answerCbQuery('✅ Kunde wurde zum Feedback eingeladen!').catch(() => {});
+        } catch (error) {
+            console.error('Allow Feedback Error:', error.message);
+            ctx.answerCbQuery('❌ Fehler beim Qualifizieren.', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    // NEU: Feedback Freigeben / Ablehnen
+    bot.action(/^fb_approve_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const feedbackId = ctx.match[1];
+            await feedbackRepo.updateFeedbackStatus(feedbackId, 'approved');
+            ctx.answerCbQuery('✅ Feedback freigegeben.').catch(() => {});
+            if (ctx.callbackQuery.message) {
+                await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n*STATUS: Freigegeben ✅*', { parse_mode: 'Markdown' });
+            }
+        } catch (error) { console.error('Approve FB Error:', error.message); }
+    });
+
+    bot.action(/^fb_reject_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const feedbackId = ctx.match[1];
+            await feedbackRepo.updateFeedbackStatus(feedbackId, 'rejected');
+            ctx.answerCbQuery('❌ Feedback abgelehnt.').catch(() => {});
+            if (ctx.callbackQuery.message) {
+                await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n*STATUS: Abgelehnt ❌*', { parse_mode: 'Markdown' });
+            }
+        } catch (error) { console.error('Reject FB Error:', error.message); }
     });
 
     bot.on('message', async (ctx, next) => {

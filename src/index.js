@@ -28,20 +28,19 @@ const addPaymentMethodScene = require('./bot/scenes/addPaymentMethodScene');
 const checkoutScene = require('./bot/scenes/checkoutScene');
 const contactScene = require('./bot/scenes/contactScene');
 const editWelcomeMsgScene = require('./bot/scenes/editWelcomeMsgScene');
+const feedbackScene = require('./bot/scenes/feedbackScene');
 
 const notificationService = require('./services/notificationService');
 const cronService = require('./services/cronService');
 
 const { checkBan } = require('./bot/middlewares/auth');
 
-// ── RENDER HEALTH CHECK SERVER ──
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shop Bot is alive!');
 });
 
 const PORT = process.env.PORT || 10000;
-// WICHTIG: '0.0.0.0' zwingt den Server, für Render sichtbar zu sein!
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Health-check server listening on port ${PORT}`);
 });
@@ -70,7 +69,8 @@ const stage = new Scenes.Stage([
     addPaymentMethodScene,
     checkoutScene,
     contactScene,
-    editWelcomeMsgScene
+    editWelcomeMsgScene,
+    feedbackScene
 ]);
 
 bot.use(session());

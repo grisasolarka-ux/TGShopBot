@@ -2,7 +2,7 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.4.0
+Version: 0.5.0
 
 Diese Anleitung führt dich durch die komplette Neuinstallation 
 des Shop Bots von Null auf Hundert.
@@ -52,7 +52,7 @@ des Shop Bots von Null auf Hundert.
      SUPABASE_URL       = (Deine Supabase URL)
      SUPABASE_KEY       = (Dein Service Role Key)
      MASTER_ADMIN_ID    = (Deine Telegram ID)
-     VERSION            = 0.4.0
+     VERSION            = 0.5.0
      PORT               = 10000
 
 =========================================
@@ -65,9 +65,8 @@ des Shop Bots von Null auf Hundert.
 4. Kopiere den KOMPLETTEN SQL-Code ab der nächsten Zeile bis ganz 
    nach unten in das weiße Feld und klicke auf "Run" (oder drücke STRG+ENTER).
 
-
 -- ============================================================
--- TGShopBot v0.4.0 – KOMPLETTES SCHEMA (Neuinstallation)
+-- TGShopBot v0.5.0 – KOMPLETTES SCHEMA (Neuinstallation)
 -- WICHTIG: Dieses Script löscht ALLE bestehenden Tabellen
 -- und erstellt sie neu. NUR für Neuinstallation verwenden!
 -- ============================================================
@@ -80,6 +79,7 @@ DROP FUNCTION IF EXISTS generate_order_id();
 
 DROP TABLE IF EXISTS pending_bans CASCADE;
 DROP TABLE IF EXISTS pending_approvals CASCADE;
+DROP TABLE IF EXISTS feedbacks CASCADE;
 DROP TABLE IF EXISTS carts CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
@@ -197,6 +197,7 @@ CREATE TABLE orders (
     tx_id TEXT,
     admin_notes JSONB DEFAULT '[]'::jsonb,
     notification_msg_ids JSONB DEFAULT '[]'::jsonb,
+    feedback_invited BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -252,7 +253,25 @@ CREATE INDEX idx_pending_bans_status ON pending_bans(status);
 CREATE INDEX idx_pending_bans_expires ON pending_bans(expires_at);
 
 -- ============================================================
--- 10. ROW LEVEL SECURITY
+-- 10. FEEDBACKS
+-- ============================================================
+CREATE TABLE feedbacks (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    user_id BIGINT NOT NULL,
+    username TEXT,
+    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    comment TEXT,
+    is_anonymous BOOLEAN DEFAULT false,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_feedbacks_status ON feedbacks(status);
+CREATE INDEX idx_feedbacks_order_id ON feedbacks(order_id);
+
+-- ============================================================
+-- 11. ROW LEVEL SECURITY
 -- ============================================================
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
@@ -263,6 +282,7 @@ ALTER TABLE carts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_approvals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_bans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feedbacks ENABLE ROW LEVEL SECURITY;
 
 -- Full access policies (Bot nutzt Service Role Key)
 CREATE POLICY "users_full_access" ON users FOR ALL USING (true) WITH CHECK (true);
@@ -274,9 +294,10 @@ CREATE POLICY "carts_full_access" ON carts FOR ALL USING (true) WITH CHECK (true
 CREATE POLICY "orders_full_access" ON orders FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "pending_approvals_full_access" ON pending_approvals FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "pending_bans_full_access" ON pending_bans FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "feedbacks_full_access" ON feedbacks FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================
--- 11. VALIDIERUNG
+-- 12. VALIDIERUNG
 -- ============================================================
 DO $$
 DECLARE
@@ -284,7 +305,7 @@ DECLARE
     tables TEXT[] := ARRAY[
         'users', 'categories', 'subcategories', 'products',
         'payment_methods', 'carts', 'orders',
-        'pending_approvals', 'pending_bans'
+        'pending_approvals', 'pending_bans', 'feedbacks'
     ];
     all_ok BOOLEAN := true;
 BEGIN
@@ -329,6 +350,16 @@ BEGIN
     END IF;
 
     IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'feedback_invited'
+    ) THEN
+        RAISE NOTICE '✅ Spalte feedback_invited in orders vorhanden';
+    ELSE
+        RAISE NOTICE '❌ Spalte feedback_invited in orders fehlt';
+        all_ok := false;
+    END IF;
+
+    IF EXISTS (
         SELECT 1 FROM information_schema.triggers
         WHERE trigger_name = 'trigger_generate_order_id'
     ) THEN
@@ -350,7 +381,7 @@ BEGIN
 
     IF all_ok THEN
         RAISE NOTICE '══════════════════════════════════════';
-        RAISE NOTICE '✅ SCHEMA v0.4.0 KOMPLETT INSTALLIERT';
+        RAISE NOTICE '✅ SCHEMA v0.5.0 KOMPLETT INSTALLIERT';
         RAISE NOTICE '══════════════════════════════════════';
     END IF;
 END $$;

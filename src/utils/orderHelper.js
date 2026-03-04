@@ -61,7 +61,16 @@ async function buildOrderViewPayload(order) {
         [
             { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
             { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
-        ],
+        ]
+    );
+
+    if (order.feedback_invited) {
+        keyboard.inline_keyboard.push([{ text: '✅ Für Feedback qualifiziert', callback_data: 'noop' }]);
+    } else {
+        keyboard.inline_keyboard.push([{ text: '⭐ Feedback erlauben', callback_data: `allow_fb_${order.order_id}` }]);
+    }
+
+    keyboard.inline_keyboard.push(
         [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
         [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }],
         [{ text: '🔙 Zurück zum Panel', callback_data: 'admin_panel' }]

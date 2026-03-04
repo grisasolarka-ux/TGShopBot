@@ -118,11 +118,20 @@ module.exports = {
         const map = { 'none': '📱 Digital/Kein Versand', 'shipping': '🚚 Versand', 'pickup': '🏪 Abholung', 'both': '🚚🏪 Versand & Abholung' };
         return map[option] || option;
     },
-
     getAdminInfoText: () =>
         `ℹ️ *Admin-Befehle & Funktionen*\n\n` +
         `*/start* – Bot neu starten\n` +
-        `*/orders* – Alle Bestellungen anzeigen\n` +
+        `*/allorders* – Alle Bestellungen anzeigen\n` +
+        `*/allopenorders* – Alle offenen Bestellungen anzeigen\n` +
+        `*/ban [ID]* – User sperren\n\n` +
+        `Klicke auf /orderxxxxxx in den Benachrichtigungen, um Details zu sehen.`,
+
+    getMasterInfoText: () =>
+        `👑 *Master-Befehle & Funktionen*\n\n` +
+        `*/start* – Bot neu starten\n` +
+        `*/allorders* – Alle Bestellungen anzeigen\n` +
+        `*/allopenorders* – Alle offenen Bestellungen anzeigen\n` +
+        `*/addadmin [ID]* – Neuen Admin ernennen\n` +
         `*/ban [ID]* – User sperren\n\n` +
         `Klicke auf /orderxxxxxx in den Benachrichtigungen, um Details zu sehen.`,
 
@@ -159,5 +168,35 @@ module.exports = {
         `Vielen Dank für deinen Einkauf!`,
 
     getDigitalDeliverySuccess: (orderId) => 
-        `✅ *Digital versendet!*\n\nDie Lieferung für \`#${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`
+        `✅ *Digital versendet!*\n\nDie Lieferung für \`#${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`,
+
+    getFeedbackInviteText: (orderId) => 
+        `🎉 *Feedback abgeben*\n\nDeine Bestellung \`#${orderId}\` ist qualifiziert! Wir würden uns sehr über dein Feedback freuen. Bitte bewerte deinen Einkauf bei uns:`,
+
+    getAdminFeedbackReviewNotify: (data) => 
+        `🔔 *NEUES FEEDBACK ZUR PRÜFUNG*\n\n` +
+        `👤 Kunde: ${data.username}\n` +
+        `📋 Order: \`#${data.orderId}\`\n` +
+        `⭐ Sterne: ${data.rating}/5\n` +
+        `💬 Kommentar: ${data.comment || '_Kein Kommentar_'}\n` +
+        `🕵️ Anonym: ${data.isAnonymous ? 'Ja' : 'Nein'}\n\n` +
+        `Bitte dieses Feedback freigeben oder ablehnen.`,
+
+    getFeedbackStartPrompt: () => 
+        `⭐ *Sterne-Bewertung*\n\nWie viele Sterne gibst du unserem Shop und deiner Bestellung? (1-5)`,
+
+    getFeedbackCommentPrompt: () => 
+        `✍️ *Dein Kommentar*\n\nMöchtest du uns noch ein kurzes Feedback hinterlassen? (Maximal 300 Zeichen)\n\n_Sende deinen Text jetzt in den Chat oder klicke auf Überspringen._`,
+
+    getFeedbackAnonymityPrompt: () => 
+        `🕵️ *Anonymität*\n\nMöchtest du, dass dein Name ("@Username") in der Bewertung steht, oder möchtest du als "Customer" anonym bleiben?`,
+
+    getFeedbackThanks: () => 
+        `✅ *Vielen Dank!*\n\nDein Feedback wurde erfolgreich übermittelt und wird nach kurzer Prüfung veröffentlicht.`,
+
+    getPublicFeedbacksHeader: () => 
+        `⭐ *Kunden-Feedbacks*\n\nHier siehst du die Bewertungen unserer letzten Kunden:\n\n`,
+
+    getPublicFeedbacksEmpty: () => 
+        `⭐ *Kunden-Feedbacks*\n\nBisher wurden noch keine Feedbacks freigegeben. Werde der Erste!`
 };

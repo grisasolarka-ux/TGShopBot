@@ -78,6 +78,7 @@ const notifyAdminsNewOrder = async (data) => {
         console.error('Notify New Order Error:', error.message);
     }
 };
+
 const notifyAdminsTxId = async (data) => {
     try {
         const order = await orderRepo.getOrderByOrderId(data.orderId);
@@ -178,8 +179,37 @@ const sendBroadcast = async (text, adminId) => {
     } catch (error) { console.error(error.message); }
 };
 
+const notifyCustomerFeedbackInvite = async (userId, orderId) => {
+    try {
+        const text = texts.getFeedbackInviteText(orderId);
+        const keyboard = {
+            inline_keyboard: [[{ text: '⭐ Feedback abgeben', callback_data: `start_feedback_${orderId}` }]]
+        };
+        await sendTo(userId, text, { reply_markup: keyboard });
+    } catch (error) { console.error(error.message); }
+};
+
+const notifyAdminNewFeedback = async (data) => {
+    try {
+        const text = texts.getAdminFeedbackReviewNotify(data);
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '✅ Freigeben', callback_data: `fb_approve_${data.feedbackId}` },
+                 { text: '❌ Ablehnen', callback_data: `fb_reject_${data.feedbackId}` }]
+            ]
+        };
+        const admins = await userRepo.getAllAdmins();
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
+        for (const id of targetIds) {
+            sendTo(id, text, { reply_markup: keyboard });
+        }
+    } catch (error) { console.error(error.message); }
+};
+
 module.exports = {
     init, sendTo, editAdminMessage, sendOrderReceipt, notifyCustomerStatusUpdate,
     notifyAdminsInterest, notifyAdminsNewOrder, notifyAdminsTxId, 
-    notifyAdminsPing, notifyAdminsContact, notifyMasterBan, sendBroadcast
+    notifyAdminsPing, notifyAdminsContact, notifyMasterBan, sendBroadcast,
+    notifyCustomerFeedbackInvite, notifyAdminNewFeedback
 };

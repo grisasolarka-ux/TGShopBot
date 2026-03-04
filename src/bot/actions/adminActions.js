@@ -33,6 +33,19 @@ module.exports = (bot) => {
         }
     });
 
+    // NEU: Handler für den Info-Button im Admin-Panel
+    bot.action('admin_info', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const text = texts.getAdminInfoText();
+            await uiHelper.updateOrSend(ctx, text, {
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]]
+            });
+        } catch (error) {
+            console.error('Admin Info Error:', error.message);
+        }
+    });
+
     bot.action('admin_start_broadcast', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
@@ -95,7 +108,6 @@ module.exports = (bot) => {
             console.error(error.message); 
         }
     });
-
     bot.action(/^admin_sort_cat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const direction = ctx.match[1];

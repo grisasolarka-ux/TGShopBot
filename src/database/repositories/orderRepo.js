@@ -7,7 +7,7 @@ const generateCustomOrderId = () => {
 
 const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
     shipping_link, payment_method_name,
-    delivery_method, admin_notes, tx_id, created_at, notification_msg_ids`;
+    delivery_method, admin_notes, tx_id, created_at, notification_msg_ids, feedback_invited`;
 
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod } = options;
@@ -25,7 +25,8 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             payment_method_name: paymentMethodName || 'Nicht angegeben',
             delivery_method: deliveryMethod || 'none',
             admin_notes: [],
-            notification_msg_ids: []
+            notification_msg_ids: [],
+            feedback_invited: false
         }])
         .select(SELECT_FULL);
 
@@ -186,11 +187,27 @@ const clearNotificationMsgIds = async (orderId) => {
     }
 };
 
+const setFeedbackInvited = async (orderId, isInvited) => {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .update({ feedback_invited: isInvited })
+            .eq('order_id', orderId)
+            .select(SELECT_FULL);
+        if (error) throw error;
+        return data && data[0] ? data[0] : null;
+    } catch (error) {
+        console.error('Error setting feedback invited:', error.message);
+        return null;
+    }
+};
+
 module.exports = {
     createOrder, getOrderByOrderId, getOrderById,
     updateOrderStatus, updateOrderTxId, addAdminNote,
     deleteOrder, deleteAllOrders,
     getOrdersByUser, getActiveOrdersByUser, hasActiveOrders,
     getOpenOrders, getAllOrders,
-    addNotificationMsgId, clearNotificationMsgIds
+    addNotificationMsgId, clearNotificationMsgIds,
+    setFeedbackInvited
 };

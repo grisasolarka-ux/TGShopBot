@@ -10,9 +10,10 @@ const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
 
-    bot.hears(/^\/order/i, isAdmin, async (ctx) => {
+    // GEFIXT: Reagiert jetzt nur noch auf echte Order-IDs, nicht mehr auf ähnliche Wörter!
+    bot.hears(/^\/(order[a-zA-Z0-9]+)$/i, isAdmin, async (ctx) => {
         try {
-            const orderId = ctx.message.text.split(' ')[0].replace('/', '').trim().toLowerCase();
+            const orderId = ctx.match[1].toLowerCase();
             const order = await orderRepo.getOrderByOrderId(orderId);
             
             if (!order) return ctx.reply(`⚠️ Bestellung \`${orderId}\` nicht gefunden.`, { parse_mode: 'Markdown' });
@@ -103,7 +104,8 @@ module.exports = (bot) => {
         }
     });
 
-    bot.command('orders', isAdmin, async (ctx) => {
+    // NEU: /allorders (ersetzt das fehlerhafte /orders)
+    bot.command('allorders', isAdmin, async (ctx) => {
         try {
             const orders = await orderRepo.getAllOrders(30);
             if (!orders || orders.length === 0) return ctx.reply('📋 Keine Bestellungen vorhanden.');
@@ -123,7 +125,27 @@ module.exports = (bot) => {
 
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
         } catch (error) {
-            console.error('Orders Error:', error.message);
+            console.error('AllOrders Error:', error.message);
+            ctx.reply('❌ Fehler beim Laden.');
+        }
+    });
+
+    // NEU: /allopenorders
+    bot.command('allopenorders', isAdmin, async (ctx) => {
+        try {
+            const orders = await orderRepo.getOpenOrders(30);
+            if (!orders || orders.length === 0) return ctx.reply('📋 Keine offenen Bestellungen vorhanden.');
+
+            let text = '📋 *Alle offenen Bestellungen*\n\n';
+            orders.forEach((order, i) => {
+                const date = new Date(order.created_at).toLocaleDateString('de-DE');
+                const txBadge = order.status === 'bezahlt_pending' ? '💸 ' : '';
+                text += `${i + 1}. ${txBadge}/${order.order_id} | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)} | ${date}\n`;
+            });
+
+            await ctx.reply(text, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('AllOpenOrders Error:', error.message);
             ctx.reply('❌ Fehler beim Laden.');
         }
     });

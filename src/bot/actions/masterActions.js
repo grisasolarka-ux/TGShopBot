@@ -18,7 +18,20 @@ module.exports = (bot) => {
             const role = await userRepo.getUserRole(ctx.from.id);
             await uiHelper.updateOrSend(ctx, texts.getWelcomeText(true, role), masterMenu());
         } catch (error) { 
-            console.error(error.message); 
+            console.error('Master Panel Error:', error.message); 
+        }
+    });
+
+    // NEU: Handler für den Info-Button im Master-Panel
+    bot.action('master_info', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const text = texts.getMasterInfoText();
+            await uiHelper.updateOrSend(ctx, text, {
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
+            });
+        } catch (error) {
+            console.error('Master Info Error:', error.message);
         }
     });
 
@@ -38,7 +51,6 @@ module.exports = (bot) => {
         }
     });
 
-    // --- HIER IST DER FIX FÜR DEN BUTTON ---
     bot.action('master_add_payment', isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -47,7 +59,6 @@ module.exports = (bot) => {
             console.error(error.message); 
         }
     });
-    // ---------------------------------------
 
     bot.action(/^master_view_pay_(.+)$/, isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});

@@ -10,6 +10,7 @@ module.exports = (hasOrders = false) => {
         keyboard.inline_keyboard.push([{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]);
     }
 
+    keyboard.inline_keyboard.push([{ text: '⭐ Feedbacks', callback_data: 'view_feedbacks' }]);
     keyboard.inline_keyboard.push([{ text: 'ℹ️ Info & Hilfe', callback_data: 'help_menu' }]);
 
     return keyboard;
