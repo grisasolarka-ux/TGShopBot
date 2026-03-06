@@ -5,7 +5,6 @@ const notificationService = require('../../services/notificationService');
 const config = require('../../config');
 const uiHelper = require('../../utils/uiHelper');
 const { isAdmin } = require('../middlewares/auth');
-const config = require('../../config');
 const texts = require('../../utils/texts');
 const adminKeyboards = require('../keyboards/adminKeyboards');
 
