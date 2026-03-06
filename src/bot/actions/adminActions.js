@@ -28,12 +28,9 @@ module.exports = (bot) => {
             };
             if (isMaster) keyboard.inline_keyboard.unshift([{ text: '👑 Master-Dashboard', callback_data: 'master_panel' }]);
             await uiHelper.updateOrSend(ctx, texts.getWelcomeText(isMaster, role), keyboard);
-        } catch (error) { 
-            console.error('Admin Panel Error:', error.message); 
-        }
+        } catch (error) {}
     });
 
-    // NEU: Handler für den Info-Button im Admin-Panel
     bot.action('admin_info', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -41,18 +38,14 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, text, {
                 inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]]
             });
-        } catch (error) {
-            console.error('Admin Info Error:', error.message);
-        }
+        } catch (error) {}
     });
 
     bot.action('admin_start_broadcast', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('broadcastScene'); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action('admin_manage_categories', isAdmin, async (ctx) => {
@@ -63,18 +56,14 @@ module.exports = (bot) => {
             keyboard.push([{ text: '➕ Neue Kategorie', callback_data: 'admin_add_category' }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
             await uiHelper.updateOrSend(ctx, '📁 *Kategorien verwalten*', { inline_keyboard: keyboard });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action('admin_add_category', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('addCategoryScene'); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_edit_cat_(.+)$/, isAdmin, async (ctx) => {
@@ -104,10 +93,9 @@ module.exports = (bot) => {
             let text = `Kategorie: *${category.name}*`;
             if (subcats.length > 0) text += `\n📂 ${subcats.length} Unterkategorie(n)`;
             await uiHelper.updateOrSend(ctx, text, keyboard);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
+
     bot.action(/^admin_sort_cat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const direction = ctx.match[1];
@@ -128,29 +116,22 @@ module.exports = (bot) => {
             }
             ctx.update.callback_query.data = `admin_edit_cat_${id}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_rename_cat_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('renameCategoryScene', { categoryId: ctx.match[1] }); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
-
     bot.action(/^admin_del_cat_(.+)$/, isAdmin, async (ctx) => {
         try {
             await productRepo.deleteCategory(ctx.match[1]);
             ctx.answerCbQuery('✅ Gelöscht.').catch(() => {});
             ctx.update.callback_query.data = 'admin_manage_categories';
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_add_subcat_(.+)$/, isAdmin, async (ctx) => {
@@ -160,9 +141,7 @@ module.exports = (bot) => {
             const categories = await productRepo.getActiveCategories();
             const cat = categories.find(c => c.id == categoryId);
             await ctx.scene.enter('addSubcategoryScene', { categoryId, categoryName: cat ? cat.name : 'Unbekannt' });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_edit_subcat_(.+)$/, isAdmin, async (ctx) => {
@@ -180,9 +159,7 @@ module.exports = (bot) => {
                 [{ text: '🔙 Zurück', callback_data: `admin_edit_cat_${subcat.category_id}` }]
             ]};
             await uiHelper.updateOrSend(ctx, `📂 Unterkategorie: *${subcat.name}*`, keyboard);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_sort_subcat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
@@ -210,18 +187,14 @@ module.exports = (bot) => {
             
             ctx.update.callback_query.data = `admin_edit_subcat_${id}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_rename_subcat_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('renameSubcategoryScene', { subcategoryId: ctx.match[1] }); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_del_subcat_(.+)$/, isAdmin, async (ctx) => {
@@ -233,10 +206,9 @@ module.exports = (bot) => {
                 ctx.update.callback_query.data = `admin_edit_cat_${subcat.category_id}`;
                 return bot.handleUpdate(ctx.update);
             }
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
+
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -246,9 +218,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '➕ Neues Produkt', callback_data: 'admin_add_prod_none' }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
             await uiHelper.updateOrSend(ctx, '📦 *Produkte verwalten*\n\nWähle eine Kategorie:', { inline_keyboard: keyboard });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_prod_cat_(.+)$/, isAdmin, async (ctx) => {
@@ -282,9 +252,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]);
             
             await uiHelper.updateOrSend(ctx, 'Wähle eine Unterkategorie oder ein Produkt:', { inline_keyboard: keyboard });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_prod_subcat_(.+)$/, isAdmin, async (ctx) => {
@@ -310,9 +278,7 @@ module.exports = (bot) => {
 
             const title = `📂 *${subcat ? subcat.name : 'Unterkategorie'}*\n\nWähle ein Produkt:`;
             await uiHelper.updateOrSend(ctx, title, { inline_keyboard: keyboard });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_add_prod_(.+)$/, isAdmin, async (ctx) => {
@@ -320,11 +286,8 @@ module.exports = (bot) => {
         try {
             const catId = ctx.match[1] === 'none' ? null : ctx.match[1];
             await ctx.scene.enter('addProductScene', { categoryId: catId });
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
-
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -377,22 +340,33 @@ module.exports = (bot) => {
                 [{ text: '🔙 Zurück', callback_data: backCb }]
             ]};
 
-            const hasMedia = ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation);
+            const hasMedia = ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation || ctx.callbackQuery.message.video);
 
             if (product.image_url) {
+                const sendMedia = async () => {
+                    try {
+                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                    } catch (e1) {
+                        try {
+                            await ctx.replyWithAnimation(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                        } catch (e2) {
+                            try {
+                                await ctx.replyWithVideo(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                            } catch (e3) {
+                                await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
+                            }
+                        }
+                    }
+                };
+
                 if (hasMedia) {
                     await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
                         await ctx.deleteMessage().catch(() => {});
-                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
-                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
-                        });
+                        await sendMedia();
                     });
                 } else {
                     await ctx.deleteMessage().catch(() => {});
-                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
-                        .catch(async () => {
-                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
-                        });
+                    await sendMedia();
                 }
             } else {
                 if (hasMedia) {
@@ -402,9 +376,7 @@ module.exports = (bot) => {
                     await uiHelper.updateOrSend(ctx, text, keyboard);
                 }
             }
-        } catch (error) { 
-            console.error('Admin Edit Prod Error:', error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_cycle_delivery_(.+)$/, isAdmin, async (ctx) => {
@@ -418,10 +390,7 @@ module.exports = (bot) => {
             ctx.answerCbQuery(`Lieferoption: ${texts.getDeliveryLabel(nextOption)}`).catch(() => {});
             ctx.update.callback_query.data = `admin_edit_prod_${product.id}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) {
-            console.error(error.message);
-            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_toggle_active_(.+)$/, isAdmin, async (ctx) => {
@@ -432,9 +401,7 @@ module.exports = (bot) => {
             ctx.answerCbQuery(product.is_active ? '👻 Deaktiviert' : '✅ Aktiviert').catch(() => {});
             ctx.update.callback_query.data = `admin_edit_prod_${product.id}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_toggle_stock_(.+)$/, isAdmin, async (ctx) => {
@@ -445,9 +412,7 @@ module.exports = (bot) => {
             ctx.answerCbQuery(product.is_out_of_stock ? '📦 Verfügbar' : '❌ Ausverkauft').catch(() => {});
             ctx.update.callback_query.data = `admin_edit_prod_${product.id}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_price_(.+)$/, isAdmin, async (ctx) => {
@@ -462,27 +427,21 @@ module.exports = (bot) => {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: `admin_edit_prod_${ctx.match[1]}` }]]
                 });
             }
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_rename_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('renameProductScene', { productId: ctx.match[1] }); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_img_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try { 
             await ctx.scene.enter('editProductImageScene', { productId: ctx.match[1] }); 
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_sort_prod_(up|down)_(.+)$/, isAdmin, async (ctx) => {
@@ -515,9 +474,7 @@ module.exports = (bot) => {
             }
             ctx.update.callback_query.data = `admin_edit_prod_${prodId}`;
             return bot.handleUpdate(ctx.update);
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 
     bot.action(/^admin_del_prod_(.+)$/, isAdmin, async (ctx) => {
@@ -542,8 +499,6 @@ module.exports = (bot) => {
                     inline_keyboard: [[{ text: '🔙 Zurück', callback_data: backCb }]]
                 });
             }
-        } catch (error) { 
-            console.error(error.message); 
-        }
+        } catch (error) {}
     });
 };

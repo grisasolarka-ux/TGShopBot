@@ -238,7 +238,19 @@ const notifyAdminOrderDeleteRequest = async (data) => {
         for (const id of targetIds) {
             sendTo(id, text, { reply_markup: keyboard });
         }
-    } catch (error) { console.error('Notify Order Delete Request Error:', error.message); }
+    } catch (error) { console.error(error.message); }
+};
+
+const notifyAdminsNewProduct = async (data) => {
+    try {
+        const admins = await userRepo.getAllAdmins();
+        const text = texts.getAdminNewProductNotify(data);
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
+        for (const id of targetIds) {
+            sendTo(id, text);
+        }
+    } catch (error) { console.error(error.message); }
 };
 
 module.exports = {
@@ -246,5 +258,5 @@ module.exports = {
     notifyAdminsInterest, notifyAdminsNewOrder, notifyAdminsTxId, 
     notifyAdminsPing, notifyAdminsContact, notifyMasterBan, sendBroadcast,
     notifyCustomerFeedbackInvite, notifyAdminNewFeedback,
-    notifyAdminOrderDeleteRequest
+    notifyAdminOrderDeleteRequest, notifyAdminsNewProduct
 };
