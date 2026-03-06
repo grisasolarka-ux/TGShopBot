@@ -251,5 +251,10 @@ module.exports = {
     
     getAdminPricePrompt: () => `💰 *Neuen Preis eingeben:*\n\nBitte sende den neuen Preis (z.B. \`12.50\`):`,
     
-    getAdminDeleteRequestSent: (name) => `🔔 Löschanfrage für *${name}* wurde an den Master gesendet.`
+    getAdminDeleteRequestSent: (name) => `🔔 Löschanfrage für *${name}* wurde an den Master gesendet.`,
+
+    // NEU: Diese 3 haben in deiner Version noch gefehlt!
+    getDigitalDeliverySavedButton: () => `✅ Keys gespeichert (Nachricht löschen)`,
+    getDigitalDeliveryOverviewButton: () => `📥 Digitale Keys abrufen`,
+    getDigitalDeliveryOverviewHint: () => `\n_(Deine Keys können jederzeit unten über den Button "Digitale Keys abrufen" erneut angezeigt werden)_`
 };
