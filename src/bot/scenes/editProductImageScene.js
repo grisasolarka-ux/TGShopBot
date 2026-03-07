@@ -1,7 +1,14 @@
+/**
+ * editProductImageScene.js – v0.5.63
+ * 
+ * Robustes Bild-Bearbeitungs-System mit Validierung.
+ * Unterstützt Fotos, GIFs, Videos und als Datei gesendete Medien.
+ */
+
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
-const { parseMedia } = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
+const { extractMediaFromMessage, validateFileId } = require('../../utils/imageUploader');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -24,7 +31,7 @@ const editProductImageScene = new Scenes.WizardScene(
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productId = ctx.scene.state.productId;
-        ctx.wizard.state.lastQuestion = '🖼 *Bild oder GIF ändern*\n\nBitte sende ein neues Foto, ein GIF oder ein kurzes Video.\nTippe \"Löschen\", um das Medium zu entfernen oder \"Abbrechen\".';
+        ctx.wizard.state.lastQuestion = '🖼 *Bild oder GIF ändern*\n\nBitte sende ein neues Foto, ein GIF oder ein kurzes Video.\n_(Du kannst auch als Datei senden)_\n\nTippe "Löschen", um das Medium zu entfernen oder "Abbrechen".';
 
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -45,10 +52,14 @@ const editProductImageScene = new Scenes.WizardScene(
         const productId = ctx.wizard.state.productId;
         const input = ctx.message.text?.trim();
 
+        // Abbrechen
         if (input && input.toLowerCase() === 'abbrechen') {
+            await cleanup(ctx);
+            await ctx.reply('Aktion abgebrochen.', { reply_markup: { remove_keyboard: true } });
             return backToProduct(ctx);
         }
 
+        // Befehle ignorieren
         if (input && input.startsWith('/')) {
             const warningMsg = await ctx.reply(ctx.wizard.state.lastQuestion, {
                 parse_mode: 'Markdown',
@@ -62,38 +73,89 @@ const editProductImageScene = new Scenes.WizardScene(
             return;
         }
 
-        // finalFileId wird MIT Typ-Präfix gespeichert
-        let finalFileId = undefined;
-
-        if (ctx.message.photo && ctx.message.photo.length > 0) {
-            // Fotos: höchste Auflösung nehmen
-            const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-            finalFileId = `photo:${fileId}`;
-        } else if (ctx.message.animation) {
-            finalFileId = `animation:${ctx.message.animation.file_id}`;
-        } else if (ctx.message.video) {
-            finalFileId = `video:${ctx.message.video.file_id}`;
-        } else if (input && input.toLowerCase() === 'löschen') {
-            finalFileId = null; // null = Bild entfernen
-        } else if (input && input.length > 20 && !input.includes(' ')) {
-            // Manuelle file_id oder URL (Legacy-Support)
-            finalFileId = input;
+        // Löschen
+        if (input && input.toLowerCase() === 'löschen') {
+            try {
+                await productRepo.updateProductImage(productId, null);
+                await cleanup(ctx);
+                await ctx.reply('✅ Medium erfolgreich entfernt!', { reply_markup: { remove_keyboard: true } });
+                return backToProduct(ctx);
+            } catch (error) {
+                console.error('DB Update Error (editProductImageScene delete):', error.message);
+                await cleanup(ctx);
+                await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
+                return ctx.scene.leave();
+            }
         }
 
-        try {
-            if (finalFileId !== undefined) {
-                await productRepo.updateProductImage(productId, finalFileId);
-                await cleanup(ctx);
-                await ctx.reply('✅ Medium erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
-            } else {
-                await cleanup(ctx);
-                await ctx.reply('⚠️ Ungültiges Format. Bitte sende ein Bild, GIF oder Video.', { reply_markup: { remove_keyboard: true } });
+        // ─── MEDIA ERKENNUNG (ROBUST) ─────────────────────────────────────
+
+        const media = extractMediaFromMessage(ctx.message);
+
+        if (!media) {
+            // Prüfe ob es eine manuelle file_id/URL ist (Legacy-Support)
+            if (input && input.length > 20 && !input.includes(' ')) {
+                try {
+                    await productRepo.updateProductImage(productId, input);
+                    await cleanup(ctx);
+                    await ctx.reply('✅ Medium-ID manuell gespeichert!', { reply_markup: { remove_keyboard: true } });
+                    return backToProduct(ctx);
+                } catch (error) {
+                    console.error('DB Update Error (editProductImageScene manual):', error.message);
+                    await cleanup(ctx);
+                    await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
+                    return ctx.scene.leave();
+                }
             }
+
+            // Nichts erkannt
+            const hintMsg = await ctx.reply('⚠️ Nicht erkannt. Bitte sende ein *Foto*, *GIF* oder *Video*.\n_(Du kannst auch als Datei senden)_', {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    keyboard: [[{ text: 'Löschen' }, { text: 'Abbrechen' }]],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(hintMsg.message_id);
+            return;
+        }
+
+        // Lade-Indikator
+        const loadingMsg = await ctx.reply('⏳ Medium wird überprüft...').catch(() => null);
+        if (loadingMsg) ctx.wizard.state.messagesToDelete.push(loadingMsg.message_id);
+
+        // Validierung
+        const isValid = await validateFileId(ctx, media.fileId);
+
+        if (!isValid) {
+            if (loadingMsg) {
+                await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id).catch(() => {});
+            }
+            const retryMsg = await ctx.reply('⚠️ Das Medium konnte nicht verarbeitet werden. Bitte versuche es erneut.', {
+                reply_markup: {
+                    keyboard: [[{ text: 'Löschen' }, { text: 'Abbrechen' }]],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(retryMsg.message_id);
+            return;
+        }
+
+        // Speichern
+        try {
+            await productRepo.updateProductImage(productId, media.prefixedId);
+            await cleanup(ctx);
+
+            const typeLabels = { 'photo': '📷 Foto', 'animation': '🎞 GIF', 'video': '🎬 Video' };
+            const label = typeLabels[media.type] || '📎 Medium';
+            await ctx.reply(`✅ ${label} erfolgreich gespeichert!`, { reply_markup: { remove_keyboard: true } });
             return backToProduct(ctx);
         } catch (error) {
             console.error('DB Update Error (editProductImageScene):', error.message);
             await cleanup(ctx);
-            await ctx.reply(texts.getGeneralError());
+            await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
             return ctx.scene.leave();
         }
     }

@@ -1,4 +1,12 @@
+/**
+ * uiHelper.js – v0.5.63
+ * 
+ * Robustes UI-Hilfesystem mit zuverlässiger Medien-Anzeige.
+ * Nutzt sendMediaWithRetry für fehlerfreien Bild/GIF/Video-Versand.
+ */
+
 const texts = require('./texts');
+const { sendMediaWithRetry } = require('./imageUploader');
 
 /**
  * Parst eine image_url und gibt { type, fileId } zurück.
@@ -16,45 +24,55 @@ const parseMedia = (imageUrl) => {
 
 /**
  * Sendet ein Produkt-Medium (Foto/GIF/Video) korrekt basierend auf Typ.
- * Löscht die vorherige Nachricht und sendet neu.
+ * Verwendet Retry-Logik und automatischen Typ-Fallback.
  */
 const sendProductMedia = async (ctx, imageUrl, text, replyMarkup) => {
-    const options = { parse_mode: 'Markdown', reply_markup: replyMarkup };
+    const options = { caption: text, parse_mode: 'Markdown', reply_markup: replyMarkup };
 
+    // Alte Nachricht löschen wenn vorhanden
     if (ctx.callbackQuery?.message) {
         await ctx.deleteMessage().catch(() => {});
     }
 
+    // Kein Medium → nur Text senden
     if (!imageUrl) {
-        return await ctx.reply(text, options);
+        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup });
     }
 
     const { type, fileId } = parseMedia(imageUrl);
 
-    try {
-        if (type === 'animation') {
-            return await ctx.replyWithAnimation(fileId, { caption: text, ...options });
-        } else if (type === 'video') {
-            return await ctx.replyWithVideo(fileId, { caption: text, ...options });
-        } else {
-            // photo oder unbekannt
-            return await ctx.replyWithPhoto(fileId, { caption: text, ...options });
-        }
-    } catch (e1) {
-        // Fallback: probiere alle Medientypen durch
-        console.warn(`sendProductMedia: Typ "${type}" fehlgeschlagen für ${fileId}, probiere Fallbacks...`);
-        const fallbackMethods = ['replyWithPhoto', 'replyWithAnimation', 'replyWithVideo'];
-        for (const method of fallbackMethods) {
-            try {
-                return await ctx[method](fileId, { caption: text, ...options });
-            } catch (e) {}
-        }
-        // Absoluter Fallback: Text ohne Bild
-        console.error(`sendProductMedia: Alle Medientypen fehlgeschlagen für ${fileId}`);
-        return await ctx.reply(text + texts.getAdminImageLoadError(), options);
+    if (!fileId) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup });
     }
+
+    // Primärer Versuch mit korrektem Typ und Retry-Logik
+    try {
+        return await sendMediaWithRetry(ctx, type, fileId, options);
+    } catch (primaryError) {
+        console.warn(`sendProductMedia: Primärer Typ "${type}" fehlgeschlagen: ${primaryError.message}`);
+    }
+
+    // Fallback: Andere Medientypen durchprobieren (mit Retry je Typ)
+    const allTypes = ['photo', 'animation', 'video'];
+    const fallbackTypes = allTypes.filter(t => t !== type);
+
+    for (const fallbackType of fallbackTypes) {
+        try {
+            return await sendMediaWithRetry(ctx, fallbackType, fileId, options, 1);
+        } catch (e) {
+            // Weiter zum nächsten Typ
+        }
+    }
+
+    // Absoluter Fallback: Text ohne Bild
+    console.error(`sendProductMedia: Alle Medientypen fehlgeschlagen für fileId: ${fileId.substring(0, 30)}...`);
+    return await ctx.reply(text + texts.getAdminImageLoadError(), { parse_mode: 'Markdown', reply_markup: replyMarkup });
 };
 
+/**
+ * Aktualisiert eine bestehende Nachricht oder sendet eine neue.
+ * Handhabt den Wechsel zwischen Text- und Media-Nachrichten korrekt.
+ */
 const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
     const options = {
         parse_mode: 'Markdown',
@@ -64,10 +82,10 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
     try {
         if (ctx.callbackQuery && ctx.callbackQuery.message) {
             const msg = ctx.callbackQuery.message;
-            const hasMedia = !!(msg.photo || msg.animation || msg.video);
+            const hasMedia = !!(msg.photo || msg.animation || msg.video || msg.document);
 
             if (imageUrl) {
-                // Muss Medien senden – lösche alte Nachricht und sende neu
+                // Muss Medien senden → alte Nachricht löschen und neu senden
                 await ctx.deleteMessage().catch(() => {});
                 return await sendProductMedia(ctx, imageUrl, text, replyMarkup);
             } else {

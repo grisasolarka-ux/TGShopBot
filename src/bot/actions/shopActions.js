@@ -1,3 +1,10 @@
+/**
+ * shopActions.js – v0.5.63
+ * 
+ * Shop-Aktionen mit robuster Medien-Anzeige.
+ * Verwendet sendProductMedia für korrekte Typ-Erkennung (photo/animation/video).
+ */
+
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const orderRepo = require('../../database/repositories/orderRepo');
@@ -154,6 +161,7 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
+    // ─── PRODUKT-DETAIL MIT ROBUSTER MEDIEN-ANZEIGE ───────────────────────
     bot.action(/^product_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -190,24 +198,12 @@ module.exports = (bot) => {
             }
             keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
 
-            const hasMedia = ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation);
-
+            // Robuste Medien-Anzeige über sendProductMedia (parst photo:/animation:/video: Präfixe korrekt)
             if (product.image_url) {
-                if (hasMedia) {
-                    await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
-                        await ctx.deleteMessage().catch(() => {});
-                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
-                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
-                        });
-                    });
-                } else {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
-                        .catch(async () => {
-                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
-                        });
-                }
+                await uiHelper.sendProductMedia(ctx, product.image_url, text, keyboard);
             } else {
+                const hasMedia = ctx.callbackQuery?.message && 
+                    (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation || ctx.callbackQuery.message.video);
                 if (hasMedia) {
                     await ctx.deleteMessage().catch(() => {});
                     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });

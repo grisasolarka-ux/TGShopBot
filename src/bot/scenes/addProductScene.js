@@ -1,3 +1,11 @@
+/**
+ * addProductScene.js – v0.5.63
+ * 
+ * Robuster Produkterstellungs-Wizard mit zuverlässigem Media-Upload.
+ * Verwendet extractMediaFromMessage für einheitliche Medienerkennung
+ * und validateFileId zur Überprüfung vor dem Speichern.
+ */
+
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
@@ -5,6 +13,7 @@ const uiHelper = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
+const { extractMediaFromMessage, validateFileId } = require('../../utils/imageUploader');
 
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
@@ -167,29 +176,7 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.fileId = null;
                 ctx.wizard.state.step = 'delivery';
-                await ctx.editMessageText('🚚 *Lieferoption für dieses Produkt:*', {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
-                            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
-                            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
-                            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
-                        ]
-                    }
-                }).catch(async () => {
-                    await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
-                                [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
-                                [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
-                                [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
-                            ]
-                        }
-                    });
-                });
+                await showDeliveryOptions(ctx);
                 return;
             }
 
@@ -220,6 +207,7 @@ const addProductScene = new Scenes.WizardScene(
                         
                         const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
                         let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
+                        if (pd.fileId) successText += '\n🖼 Medium gespeichert';
 
                         await ctx.editMessageText(successText, {
                             parse_mode: 'Markdown',
@@ -252,6 +240,8 @@ const addProductScene = new Scenes.WizardScene(
                 }
             }
         }
+
+        // ─── TEXT-EINGABEN ─────────────────────────────────────────────────
 
         if (ctx.wizard.state.step === 'name' && ctx.message?.text) {
             const name = ctx.message.text.trim();
@@ -286,37 +276,77 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        if (ctx.wizard.state.step === 'image') {
-            let fileId = null;
-            if (ctx.message?.photo && ctx.message.photo.length > 0) {
-                fileId = `photo:${ctx.message.photo[ctx.message.photo.length - 1].file_id}`;
-            } else if (ctx.message?.animation) {
-                fileId = `animation:${ctx.message.animation.file_id}`;
-            } else if (ctx.message?.video) {
-                fileId = `video:${ctx.message.video.file_id}`;
+        // ─── MEDIA-UPLOAD (ROBUST) ────────────────────────────────────────
+
+        if (ctx.wizard.state.step === 'image' && ctx.message) {
+            const media = extractMediaFromMessage(ctx.message);
+
+            if (!media) {
+                // Kein Medium erkannt → Hinweis
+                await ctx.reply('⚠️ Bitte sende ein *Foto*, *GIF* oder *Video*.\n\nDu kannst auch als Datei senden.', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_img' }]] }
+                });
+                return;
             }
 
-            if (fileId) {
-                ctx.wizard.state.productData.fileId = fileId;
-                ctx.wizard.state.step = 'delivery';
-                await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
-                            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
-                            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
-                            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
-                        ]
-                    }
-                });
-            } else {
-                await ctx.reply('⚠️ Bitte sende ein Bild, ein GIF oder ein kurzes Video.');
+            // Lade-Indikator senden
+            const loadingMsg = await ctx.reply('⏳ Medium wird überprüft...').catch(() => null);
+
+            // Validierung: Prüfe ob file_id tatsächlich abrufbar ist
+            const isValid = await validateFileId(ctx, media.fileId);
+
+            // Lade-Nachricht löschen
+            if (loadingMsg) {
+                await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id).catch(() => {});
             }
+
+            if (!isValid) {
+                await ctx.reply('⚠️ Das Medium konnte nicht verarbeitet werden. Bitte versuche es erneut oder sende eine andere Datei.', {
+                    reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_img' }]] }
+                });
+                return;
+            }
+
+            // Erfolgreich validiert → speichern
+            ctx.wizard.state.productData.fileId = media.prefixedId;
+            ctx.wizard.state.step = 'delivery';
+
+            const typeLabels = { 'photo': '📷 Foto', 'animation': '🎞 GIF', 'video': '🎬 Video' };
+            const label = typeLabels[media.type] || '📎 Medium';
+            await ctx.reply(`✅ ${label} erfolgreich erkannt!`);
+
+            // Kurze Pause damit User die Bestätigung sieht
+            await new Promise(r => setTimeout(r, 500));
+            await showDeliveryOptions(ctx);
             return;
         }
     }
 );
+
+/**
+ * Hilfsfunktion: Zeigt die Lieferoptionen an.
+ */
+async function showDeliveryOptions(ctx) {
+    const deliveryKeyboard = {
+        inline_keyboard: [
+            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
+            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
+            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
+            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+        ]
+    };
+
+    await ctx.editMessageText?.('🚚 *Lieferoption für dieses Produkt:*', {
+        parse_mode: 'Markdown',
+        reply_markup: deliveryKeyboard
+    }).catch(async () => {
+        await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+            parse_mode: 'Markdown',
+            reply_markup: deliveryKeyboard
+        });
+    });
+}
 
 addProductScene.action('cancel_add', async (ctx) => {
     ctx.answerCbQuery('Abgebrochen').catch(() => {});
