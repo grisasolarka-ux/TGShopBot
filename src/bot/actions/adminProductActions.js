@@ -1,3 +1,10 @@
+/**
+ * adminProductActions.js – v0.5.64
+ * 
+ * Admin-Produktverwaltung mit flicker-freier Medien-Anzeige.
+ * Verwendet showProductWithMedia für intelligente Media/Text-Übergänge.
+ */
+
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
@@ -74,7 +81,7 @@ module.exports = (bot) => {
         } catch (error) { console.error('admin_prod_subcat error:', error.message); }
     });
 
-    // ─── PRODUKT ANZEIGEN ─────────────────────────────────────────────────────
+    // ─── PRODUKT ANZEIGEN (MIT FLICKER-FREIER MEDIEN-ANZEIGE) ──────────────
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -85,8 +92,8 @@ module.exports = (bot) => {
             const backCb = getBackCb(product);
             const keyboard = adminKeyboards.getEditProductMenu(product, deliveryLabel, backCb);
 
-            // image_url kann "photo:file_id", "animation:file_id", "video:file_id" oder legacy file_id/URL sein
-            await uiHelper.sendProductMedia(ctx, product.image_url, text, keyboard);
+            // Intelligente Media-Anzeige: editMessageMedia wenn möglich, sonst delete+send
+            await uiHelper.showProductWithMedia(ctx, product.image_url, text, keyboard);
         } catch (error) { console.error('admin_edit_prod error:', error.message); }
     });
 
@@ -214,7 +221,6 @@ module.exports = (bot) => {
             const backCb = getBackCb(product);
 
             if (isMaster) {
-                // Master kann direkt löschen – Bestätigungsdialog
                 await uiHelper.updateOrSend(ctx,
                     `🗑 *Produkt endgültig löschen?*\n\n📦 *${product.name}*\n\n⚠️ Diese Aktion kann nicht rückgängig gemacht werden!`,
                     {
@@ -225,11 +231,9 @@ module.exports = (bot) => {
                     }
                 );
             } else {
-                // Temporärer Admin → Anfrage an Master
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 const approval = await approvalRepo.createApproval(product.id, 'DELETE', null, adminName);
 
-                // Master per Direktnachricht benachrichtigen
                 await notificationService.notifyMasterProductDeleteRequest({
                     adminName,
                     productName: product.name,

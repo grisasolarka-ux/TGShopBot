@@ -1,8 +1,8 @@
 /**
- * shopActions.js – v0.5.63
+ * shopActions.js – v0.5.64
  * 
- * Shop-Aktionen mit robuster Medien-Anzeige.
- * Verwendet sendProductMedia für korrekte Typ-Erkennung (photo/animation/video).
+ * Shop-Aktionen mit flicker-freier Medien-Anzeige via editMessageMedia.
+ * Verwendet showProductWithMedia für intelligente Media/Text-Übergänge.
  */
 
 const productRepo = require('../../database/repositories/productRepo');
@@ -41,6 +41,15 @@ module.exports = (bot) => {
                 keyboard = customerMenu(hasOrders);
             }
 
+            // Zurück zum Hauptmenü → immer Text (löscht Media-Nachricht falls nötig)
+            if (ctx.callbackQuery?.message) {
+                const hasMedia = !!(ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation || ctx.callbackQuery.message.video);
+                if (hasMedia) {
+                    await ctx.deleteMessage().catch(() => {});
+                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                    return;
+                }
+            }
             await ctx.deleteMessage().catch(() => {});
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
         } catch (error) {
@@ -51,19 +60,8 @@ module.exports = (bot) => {
     bot.action('help_menu', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
-            await ctx.editMessageText(texts.getHelpText(), {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
-                }
-            }).catch(async () => {
-                await ctx.deleteMessage().catch(() => {});
-                await ctx.reply(texts.getHelpText(), {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
-                    }
-                });
+            await uiHelper.updateOrSend(ctx, texts.getHelpText(), {
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
             });
         } catch (error) { console.error(error.message); }
     });
@@ -77,18 +75,13 @@ module.exports = (bot) => {
             if (!categories || categories.length === 0) {
                 const emptyText = '🛍 *Shop*\n\nDerzeit sind keine Produkte verfügbar.';
                 const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] };
-                return await ctx.editMessageText(emptyText, { parse_mode: 'Markdown', reply_markup: emptyKb })
-                    .catch(() => ctx.reply(emptyText, { parse_mode: 'Markdown', reply_markup: emptyKb }));
+                return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
             }
 
             const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `category_${c.id}` }]));
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'back_to_main' }]);
 
-            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } })
-                .catch(async () => {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
-                });
+            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
 
@@ -113,8 +106,7 @@ module.exports = (bot) => {
                 if (!products || products.length === 0) {
                     const emptyText = 'Diese Kategorie ist aktuell leer.';
                     const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'shop_menu' }]] };
-                    return await ctx.editMessageText(emptyText, { reply_markup: emptyKb })
-                        .catch(() => ctx.reply(emptyText, { reply_markup: emptyKb }));
+                    return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
                 }
                 products.forEach(p => {
                     let label = p.is_out_of_stock ? `❌ ${p.name}` : p.name;
@@ -123,11 +115,7 @@ module.exports = (bot) => {
             }
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
             
-            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } })
-                .catch(async () => {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
-                });
+            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
 
@@ -142,8 +130,7 @@ module.exports = (bot) => {
             if (!products || products.length === 0) {
                 const emptyText = 'Keine Produkte verfügbar.';
                 const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: backCb }]] };
-                return await ctx.editMessageText(emptyText, { reply_markup: emptyKb })
-                    .catch(() => ctx.reply(emptyText, { reply_markup: emptyKb }));
+                return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
             }
 
             const keyboard = products.map(p => {
@@ -153,15 +140,11 @@ module.exports = (bot) => {
             keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
             
             const title = `📂 *${subcat ? subcat.name : ''}*`;
-            await ctx.editMessageText(title, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } })
-                .catch(async () => {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.reply(title, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
-                });
+            await uiHelper.updateOrSend(ctx, title, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
 
-    // ─── PRODUKT-DETAIL MIT ROBUSTER MEDIEN-ANZEIGE ───────────────────────
+    // ─── PRODUKT-DETAIL MIT INTELLIGENTER MEDIEN-ANZEIGE ───────────────────
     bot.action(/^product_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -198,19 +181,8 @@ module.exports = (bot) => {
             }
             keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
 
-            // Robuste Medien-Anzeige über sendProductMedia (parst photo:/animation:/video: Präfixe korrekt)
-            if (product.image_url) {
-                await uiHelper.sendProductMedia(ctx, product.image_url, text, keyboard);
-            } else {
-                const hasMedia = ctx.callbackQuery?.message && 
-                    (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation || ctx.callbackQuery.message.video);
-                if (hasMedia) {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-                } else {
-                    await uiHelper.updateOrSend(ctx, text, keyboard);
-                }
-            }
+            // Intelligente Media-Anzeige: editMessageMedia wenn möglich, sonst delete+send
+            await uiHelper.showProductWithMedia(ctx, product.image_url, text, keyboard);
         } catch (error) { console.error(error.message); }
     });
 
@@ -240,24 +212,13 @@ module.exports = (bot) => {
 
     bot.action('admin_info', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        await ctx.editMessageText(texts.getAdminInfoText(), { 
-            parse_mode: 'Markdown', 
-            reply_markup: adminKeyboards.getBackToAdminPanel()
-        }).catch(() => ctx.reply(texts.getAdminInfoText(), { 
-            parse_mode: 'Markdown', 
-            reply_markup: adminKeyboards.getBackToAdminPanel()
-        }));
+        await uiHelper.updateOrSend(ctx, texts.getAdminInfoText(), adminKeyboards.getBackToAdminPanel());
     });
 
     bot.action('master_info', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        await ctx.editMessageText(texts.getMasterInfoText(), { 
-            parse_mode: 'Markdown', 
-            reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] } 
-        }).catch(() => ctx.reply(texts.getMasterInfoText(), { 
-            parse_mode: 'Markdown', 
-            reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] } 
-        }));
+        await uiHelper.updateOrSend(ctx, texts.getMasterInfoText(), 
+            { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] });
     });
 
     bot.action('noop', async (ctx) => {

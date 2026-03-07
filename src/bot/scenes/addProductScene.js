@@ -1,5 +1,5 @@
 /**
- * addProductScene.js – v0.5.63
+ * addProductScene.js – v0.5.64
  * 
  * Robuster Produkterstellungs-Wizard mit zuverlässigem Media-Upload.
  * Verwendet extractMediaFromMessage für einheitliche Medienerkennung
@@ -233,7 +233,7 @@ const addProductScene = new Scenes.WizardScene(
                             }).catch(() => {});
                         }
                     } catch (error) {
-                        console.error('Add Product Error:', error.message);
+                        console.error('[addProductScene] Error:', error.message);
                         await ctx.reply(`⚠️ Fehler beim Speichern: ${error.message}`);
                     }
                     return ctx.scene.leave();
@@ -276,13 +276,12 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        // ─── MEDIA-UPLOAD (ROBUST) ────────────────────────────────────────
+        // ─── MEDIA-UPLOAD ─────────────────────────────────────────────────
 
         if (ctx.wizard.state.step === 'image' && ctx.message) {
             const media = extractMediaFromMessage(ctx.message);
 
             if (!media) {
-                // Kein Medium erkannt → Hinweis
                 await ctx.reply('⚠️ Bitte sende ein *Foto*, *GIF* oder *Video*.\n\nDu kannst auch als Datei senden.', {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_img' }]] }
@@ -290,7 +289,7 @@ const addProductScene = new Scenes.WizardScene(
                 return;
             }
 
-            // Lade-Indikator senden
+            // Lade-Indikator
             const loadingMsg = await ctx.reply('⏳ Medium wird überprüft...').catch(() => null);
 
             // Validierung: Prüfe ob file_id tatsächlich abrufbar ist
@@ -308,7 +307,7 @@ const addProductScene = new Scenes.WizardScene(
                 return;
             }
 
-            // Erfolgreich validiert → speichern
+            // Erfolgreich validiert → speichern mit Typ-Präfix
             ctx.wizard.state.productData.fileId = media.prefixedId;
             ctx.wizard.state.step = 'delivery';
 
