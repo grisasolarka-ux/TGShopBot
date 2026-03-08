@@ -2,7 +2,7 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.5.6
+Version: 0.5.65
 
 Diese Anleitung führt dich durch die komplette Neuinstallation 
 des Shop Bots von Null auf Hundert.
@@ -16,6 +16,10 @@ des Shop Bots von Null auf Hundert.
    - Sende den Befehl /newbot
    - Wähle einen Namen und einen Username (muss auf "bot" enden)
    - Kopiere den HTTP API Token (z.B. 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)
+   - EMPFOHLEN: Sende danach /setcommands und registriere:
+       start - Bot starten
+       myorders - Meine Bestellungen
+       feedbacks - Shop-Bewertungen ansehen
 
 2. DATENBANK (SUPABASE) ERSTELLEN
    - Gehe auf https://supabase.com und erstelle einen kostenlosen Account.
@@ -52,8 +56,9 @@ des Shop Bots von Null auf Hundert.
      SUPABASE_URL       = (Deine Supabase URL)
      SUPABASE_KEY       = (Dein Service Role Key)
      MASTER_ADMIN_ID    = (Deine Telegram ID)
-     VERSION            = 0.5.0
-     PORT               = 10000
+
+   HINWEIS: Die Bot-Version wird automatisch aus version.txt gelesen.
+   Die Variable VERSION muss NICHT gesetzt werden.
 
 =========================================
  TEIL 3: DATENBANK-SCHEMA INSTALLIEREN
@@ -65,18 +70,42 @@ des Shop Bots von Null auf Hundert.
 4. Kopiere den KOMPLETTEN SQL-Code ab der nächsten Zeile bis ganz 
    nach unten in das weiße Feld und klicke auf "Run" (oder drücke STRG+ENTER).
 
+   WICHTIG: Das Script erstellt ALLE Tabellen neu.
+   NUR für Neuinstallation oder Reset verwenden!
+
 -- ============================================================
--- TGShopBot v0.5.0 – KOMPLETTES SCHEMA (Neuinstallation)
--- WICHTIG: Dieses Script löscht ALLE bestehenden Tabellen
--- und erstellt sie neu. NUR für Neuinstallation verwenden!
+-- TGShopBot v0.5.65 – KOMPLETTES SCHEMA (Neuinstallation)
+-- ============================================================
+-- Erstellt alle 11 Tabellen, Indizes, Trigger und RLS-Policies.
+-- Getestet mit Supabase (PostgreSQL 15+).
+--
+-- Tabellen:
+--   1.  users              – Telegram-User (Kunden, Admins, Master)
+--   2.  categories         – Produktkategorien
+--   3.  subcategories      – Unterkategorien
+--   4.  products           – Produkte mit Bild, Preis, Lieferoption
+--   5.  payment_methods    – Zahlungsarten (Crypto-Wallets etc.)
+--   6.  carts              – Warenkörbe
+--   7.  orders             – Bestellungen mit Status-Workflow
+--   8.  pending_approvals  – Master-Freigabe-Workflow
+--   9.  pending_bans       – 48h Ban-Bestätigungen
+--   10. feedbacks          – Kundenbewertungen
+--   11. settings           – Key-Value-Store (Begrüßungsnachricht etc.)
 -- ============================================================
 
 -- ============================================================
 -- 0. CLEANUP: Alte Tabellen, Trigger, Funktionen entfernen
 -- ============================================================
-DROP TRIGGER IF EXISTS trigger_generate_order_id ON orders;
+-- Trigger muss VOR der Tabelle entfernt werden.
+-- DO-Block fängt den Fehler ab falls die Tabelle noch nicht existiert (Neuinstallation).
+DO $$ BEGIN
+    DROP TRIGGER IF EXISTS trigger_generate_order_id ON orders;
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
+
 DROP FUNCTION IF EXISTS generate_order_id();
 
+DROP TABLE IF EXISTS settings CASCADE;
 DROP TABLE IF EXISTS pending_bans CASCADE;
 DROP TABLE IF EXISTS pending_approvals CASCADE;
 DROP TABLE IF EXISTS feedbacks CASCADE;
@@ -93,11 +122,17 @@ DROP SEQUENCE IF EXISTS order_number_seq;
 -- ============================================================
 -- 1. USERS
 -- ============================================================
+-- Speichert alle Telegram-User die den Bot nutzen.
+-- role: 'customer' | 'admin' (vom Master ernannt)
+-- Master wird über ENV MASTER_ADMIN_ID identifiziert, nicht über role.
+-- has_received_welcome: Verhindert doppelte Begrüßungsnachricht.
+
 CREATE TABLE users (
     telegram_id BIGINT PRIMARY KEY,
     username TEXT,
     role TEXT DEFAULT 'customer',
     is_banned BOOLEAN DEFAULT false,
+    has_received_welcome BOOLEAN DEFAULT false,
     last_ping_at TIMESTAMPTZ,
     last_contact_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -109,6 +144,9 @@ CREATE INDEX idx_users_banned ON users(is_banned);
 -- ============================================================
 -- 2. CATEGORIES
 -- ============================================================
+-- Hauptkategorien für die Produktstruktur.
+-- sort_order: Reihenfolge im Shop (0 = oben).
+
 CREATE TABLE categories (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
@@ -120,6 +158,9 @@ CREATE TABLE categories (
 -- ============================================================
 -- 3. SUBCATEGORIES
 -- ============================================================
+-- Unterkategorien, gehören jeweils zu einer Kategorie.
+-- ON DELETE CASCADE: Wird die Kategorie gelöscht, verschwinden auch die Unterkategorien.
+
 CREATE TABLE subcategories (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     category_id UUID NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
@@ -135,6 +176,13 @@ CREATE INDEX idx_subcategories_active ON subcategories(is_active);
 -- ============================================================
 -- 4. PRODUCTS
 -- ============================================================
+-- image_url: Speichert Telegram file_id mit Typ-Präfix.
+--   Format: "photo:FILE_ID", "animation:FILE_ID", "video:FILE_ID"
+--   Legacy (kein Präfix): wird als Foto behandelt.
+--
+-- delivery_option: 'none' | 'shipping' | 'pickup' | 'both'
+--   Bestimmt welche Lieferoptionen dem Kunden angezeigt werden.
+
 CREATE TABLE products (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
@@ -158,6 +206,9 @@ CREATE INDEX idx_products_active ON products(is_active);
 -- ============================================================
 -- 5. PAYMENT METHODS
 -- ============================================================
+-- Zahlungsarten die der Master über das Bot-Menü verwaltet.
+-- wallet_address: Wird dem Kunden beim Checkout als kopierbarer Text angezeigt.
+
 CREATE TABLE payment_methods (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
@@ -168,6 +219,10 @@ CREATE TABLE payment_methods (
 -- ============================================================
 -- 6. CARTS
 -- ============================================================
+-- Temporärer Warenkorb pro User.
+-- category_path: Speichert den Breadcrumb-Pfad (z.B. "Kategorie » Unterkategorie")
+--   für die Darstellung in der Bestellübersicht.
+
 CREATE TABLE carts (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
@@ -181,6 +236,19 @@ CREATE INDEX idx_carts_user ON carts(user_id);
 -- ============================================================
 -- 7. ORDERS
 -- ============================================================
+-- Bestellungen mit Status-Workflow.
+--
+-- Status-Lifecycle:
+--   offen → bezahlt → in_bearbeitung → versendet → abgeschlossen
+--                                                 → abgebrochen
+--
+-- order_id: Lesbare ID wie "orderabc123" (generiert im Code via crypto).
+-- details: JSONB-Array mit Bestellpositionen [{name, price, quantity, ...}].
+-- admin_notes: JSONB-Array mit Admin-Notizen [{text, by, at}].
+-- notification_msg_ids: JSONB-Array mit Message-IDs für Smart Cleaning.
+-- digital_delivery: Freitext für digitale Lieferungen (Codes, Links etc.).
+-- tx_id: Vom Kunden eingegebene Transaktions-ID zur Zahlungsbestätigung.
+
 CREATE SEQUENCE order_number_seq START WITH 10001;
 
 CREATE TABLE orders (
@@ -191,13 +259,13 @@ CREATE TABLE orders (
     status TEXT DEFAULT 'offen',
     details JSONB DEFAULT '[]'::jsonb,
     shipping_link TEXT,
-    payment_link TEXT,
     payment_method_name TEXT DEFAULT 'Nicht angegeben',
     delivery_method TEXT,
     tx_id TEXT,
     admin_notes JSONB DEFAULT '[]'::jsonb,
     notification_msg_ids JSONB DEFAULT '[]'::jsonb,
     feedback_invited BOOLEAN DEFAULT false,
+    digital_delivery TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -205,7 +273,7 @@ CREATE INDEX idx_orders_order_id ON orders(order_id);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_user_status ON orders(user_id, status);
 
--- Trigger: Order-ID automatisch generieren
+-- Trigger: Order-ID automatisch generieren (Fallback, falls Code keine setzt)
 CREATE OR REPLACE FUNCTION generate_order_id()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -224,10 +292,19 @@ CREATE TRIGGER trigger_generate_order_id
 -- ============================================================
 -- 8. PENDING APPROVALS (Master Approval Workflow)
 -- ============================================================
+-- Wenn ein temporärer Admin eine geschützte Aktion ausführen will
+-- (Produkt löschen, Preis ändern), wird hier eine Anfrage erstellt.
+-- Der Master genehmigt oder lehnt ab.
+--
+-- action_type: 'DELETE' | 'PRICE_CHANGE' | 'ORDER_DELETE'
+-- target_id: Produkt-UUID (als TEXT) oder Order-ID
+-- new_value: Neuer Preis (als TEXT) bei PRICE_CHANGE
+-- requested_by: Admin-Name als TEXT (z.B. "@username" oder "ID: 123")
+
 CREATE TABLE pending_approvals (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     action_type TEXT NOT NULL,
-    requested_by BIGINT REFERENCES users(telegram_id),
+    requested_by TEXT,
     target_id TEXT,
     new_value TEXT,
     status TEXT DEFAULT 'pending',
@@ -235,10 +312,14 @@ CREATE TABLE pending_approvals (
 );
 
 CREATE INDEX idx_approvals_status ON pending_approvals(status);
+CREATE INDEX idx_approvals_target ON pending_approvals(target_id);
 
 -- ============================================================
 -- 9. PENDING BANS (48h Master-Bestätigung)
 -- ============================================================
+-- Wenn ein Admin einen Kunden bannt, wird das hier gespeichert.
+-- Der Master hat 48 Stunden Zeit zum Bestätigen, sonst verfällt der Ban.
+
 CREATE TABLE pending_bans (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -255,6 +336,10 @@ CREATE INDEX idx_pending_bans_expires ON pending_bans(expires_at);
 -- ============================================================
 -- 10. FEEDBACKS
 -- ============================================================
+-- Kundenbewertungen für abgeschlossene Bestellungen.
+-- Workflow: Kunde bewertet → Admin prüft → Freigabe → öffentlich sichtbar.
+-- is_anonymous: Zeigt "CustomerXXXX" statt echtem Username.
+
 CREATE TABLE feedbacks (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     order_id TEXT NOT NULL,
@@ -271,8 +356,26 @@ CREATE INDEX idx_feedbacks_status ON feedbacks(status);
 CREATE INDEX idx_feedbacks_order_id ON feedbacks(order_id);
 
 -- ============================================================
--- 11. ROW LEVEL SECURITY
+-- 11. SETTINGS (Key-Value-Store)
 -- ============================================================
+-- Speichert Bot-Einstellungen wie die benutzerdefinierte Begrüßungsnachricht.
+-- Wird über das Master-Menü "Begrüßungsnachricht" verwaltet.
+--
+-- Aktuelle Keys:
+--   'welcome_message' → Benutzerdefinierte Willkommensnachricht (Markdown)
+
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- 12. ROW LEVEL SECURITY
+-- ============================================================
+-- Der Bot nutzt den Supabase service_role Key und benötigt daher
+-- Full-Access-Policies. RLS wird trotzdem aktiviert als Sicherheitsnetz.
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subcategories ENABLE ROW LEVEL SECURITY;
@@ -283,8 +386,8 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_approvals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_bans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedbacks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 
--- Full access policies (Bot nutzt Service Role Key)
 CREATE POLICY "users_full_access" ON users FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "categories_full_access" ON categories FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "subcategories_full_access" ON subcategories FOR ALL USING (true) WITH CHECK (true);
@@ -295,20 +398,25 @@ CREATE POLICY "orders_full_access" ON orders FOR ALL USING (true) WITH CHECK (tr
 CREATE POLICY "pending_approvals_full_access" ON pending_approvals FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "pending_bans_full_access" ON pending_bans FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "feedbacks_full_access" ON feedbacks FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "settings_full_access" ON settings FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================
--- 12. VALIDIERUNG
+-- 13. VALIDIERUNG
 -- ============================================================
+-- Prüft nach dem Ausführen ob alle Tabellen und Spalten korrekt erstellt wurden.
+-- Ergebnis wird im "Messages"-Tab des SQL Editors angezeigt.
+
 DO $$
 DECLARE
     tbl TEXT;
     tables TEXT[] := ARRAY[
         'users', 'categories', 'subcategories', 'products',
         'payment_methods', 'carts', 'orders',
-        'pending_approvals', 'pending_bans', 'feedbacks'
+        'pending_approvals', 'pending_bans', 'feedbacks', 'settings'
     ];
     all_ok BOOLEAN := true;
 BEGIN
+    -- Tabellen prüfen
     FOREACH tbl IN ARRAY tables LOOP
         IF NOT EXISTS (
             SELECT 1 FROM information_schema.tables
@@ -316,96 +424,158 @@ BEGIN
         ) THEN
             RAISE NOTICE '❌ Tabelle fehlt: %', tbl;
             all_ok := false;
+        ELSE
+            RAISE NOTICE '✅ Tabelle: %', tbl;
         END IF;
     END LOOP;
 
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'sort_order'
-    ) THEN
-        RAISE NOTICE '✅ Spalte sort_order in products vorhanden';
-    ELSE
-        RAISE NOTICE '❌ Spalte sort_order in products fehlt';
-        all_ok := false;
-    END IF;
-    
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'carts' AND column_name = 'category_path'
-    ) THEN
-        RAISE NOTICE '✅ Spalte category_path in carts vorhanden';
-    ELSE
-        RAISE NOTICE '❌ Spalte category_path in carts fehlt';
-        all_ok := false;
-    END IF;
-    
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'notification_msg_ids'
-    ) THEN
-        RAISE NOTICE '✅ Spalte notification_msg_ids in orders vorhanden';
-    ELSE
-        RAISE NOTICE '❌ Spalte notification_msg_ids in orders fehlt';
-        all_ok := false;
-    END IF;
+    -- Kritische Spalten prüfen
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='has_received_welcome') THEN
+        RAISE NOTICE '  ❌ users.has_received_welcome FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ users.has_received_welcome'; END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'feedback_invited'
-    ) THEN
-        RAISE NOTICE '✅ Spalte feedback_invited in orders vorhanden';
-    ELSE
-        RAISE NOTICE '❌ Spalte feedback_invited in orders fehlt';
-        all_ok := false;
-    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='products' AND column_name='sort_order') THEN
+        RAISE NOTICE '  ❌ products.sort_order FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ products.sort_order'; END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM information_schema.triggers
-        WHERE trigger_name = 'trigger_generate_order_id'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='products' AND column_name='image_url') THEN
+        RAISE NOTICE '  ❌ products.image_url FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ products.image_url'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='products' AND column_name='delivery_option') THEN
+        RAISE NOTICE '  ❌ products.delivery_option FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ products.delivery_option'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='carts' AND column_name='category_path') THEN
+        RAISE NOTICE '  ❌ carts.category_path FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ carts.category_path'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='notification_msg_ids') THEN
+        RAISE NOTICE '  ❌ orders.notification_msg_ids FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ orders.notification_msg_ids'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='feedback_invited') THEN
+        RAISE NOTICE '  ❌ orders.feedback_invited FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ orders.feedback_invited'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='digital_delivery') THEN
+        RAISE NOTICE '  ❌ orders.digital_delivery FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ orders.digital_delivery'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='tx_id') THEN
+        RAISE NOTICE '  ❌ orders.tx_id FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ orders.tx_id'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='admin_notes') THEN
+        RAISE NOTICE '  ❌ orders.admin_notes FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ orders.admin_notes'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='pending_approvals' AND column_name='requested_by') THEN
+        RAISE NOTICE '  ❌ pending_approvals.requested_by FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ pending_approvals.requested_by'; END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='settings' AND column_name='value') THEN
+        RAISE NOTICE '  ❌ settings.value FEHLT!'; all_ok := false;
+    ELSE RAISE NOTICE '  ✅ settings.value'; END IF;
+
+    -- Trigger prüfen
+    IF EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name = 'trigger_generate_order_id') THEN
         RAISE NOTICE '✅ Order-ID Trigger aktiv';
     ELSE
-        RAISE NOTICE '❌ Order-ID Trigger fehlt';
-        all_ok := false;
+        RAISE NOTICE '❌ Order-ID Trigger fehlt'; all_ok := false;
     END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM pg_sequences
-        WHERE schemaname = 'public' AND sequencename = 'order_number_seq'
-    ) THEN
+    -- Sequenz prüfen
+    IF EXISTS (SELECT 1 FROM pg_sequences WHERE schemaname = 'public' AND sequencename = 'order_number_seq') THEN
         RAISE NOTICE '✅ Order-Sequenz vorhanden';
     ELSE
-        RAISE NOTICE '❌ Order-Sequenz fehlt';
-        all_ok := false;
+        RAISE NOTICE '❌ Order-Sequenz fehlt'; all_ok := false;
     END IF;
 
+    -- Ergebnis
+    RAISE NOTICE '';
     IF all_ok THEN
         RAISE NOTICE '══════════════════════════════════════';
-        RAISE NOTICE '✅ SCHEMA v0.5.0 KOMPLETT INSTALLIERT';
+        RAISE NOTICE '✅ SCHEMA v0.5.65 KOMPLETT INSTALLIERT';
+        RAISE NOTICE '══════════════════════════════════════';
+    ELSE
+        RAISE NOTICE '══════════════════════════════════════';
+        RAISE NOTICE '⚠️  SCHEMA UNVOLLSTÄNDIG – siehe oben';
         RAISE NOTICE '══════════════════════════════════════';
     END IF;
 END $$;
 
-─────────────────────────────────────────
-  NEU IN v0.5.6 – Deliverables Tresor
-─────────────────────────────────────────
+=========================================
+ TEIL 4: BOT STARTEN & TESTEN
+=========================================
 
-NEUE KUNDENBEFEHLE:
-  /myorders   → Öffnet direkt die Bestellübersicht des Kunden
-  /feedbacks  → Zeigt die öffentlichen Shop-Bewertungen an
+1. LOKAL STARTEN (zum Testen)
+   node src/index.js
+   
+   Bei Erfolg siehst du im Terminal:
+   "Bot gestartet: @DeinBotName"
 
-NEUE KUNDENFEATURES:
-  • Einzel-Bestellübersicht: Jede Bestellung hat eine eigene
-    Detailseite (Ping & Kontakt sind dort integriert)
-  • Deliverables Tresor: Digitale Lieferungen bleiben dauerhaft
-    über den Tresor-Button in der Bestellübersicht abrufbar
-  • Replace anfragen: Kunden können Ersatz für digitale Artikel
-    direkt in der Bestellübersicht anfordern
+2. ERSTER TEST
+   - Öffne deinen Bot in Telegram und sende /start
+   - Du solltest als Master erkannt werden und das Master-Menü sehen.
+   - Erstelle eine Kategorie, ein Produkt, teste den Bestellfluss.
 
-NEUE MASTER-FEATURES:
-  • Deliverables Tresor im Master-Menü: Alle Bestellungen mit
-    digitaler Lieferung gesammelt einsehbar und verwaltbar
+3. RENDER.COM DEPLOYMENT
+   - Push deinen Code zu GitHub
+   - Render.com baut und startet den Bot automatisch
+   - Prüfe die Logs auf Fehler
 
-KEINE DATENBANKÄNDERUNGEN NOTWENDIG:
-  Dieses Update nutzt ausschließlich bestehende Tabellenspalten.
+=========================================
+ TEIL 5: FEHLERBEHEBUNG
+=========================================
 
+Problem: Bot antwortet nicht
+→ Prüfe ob TELEGRAM_BOT_TOKEN korrekt ist
+→ Prüfe ob der Bot auf Render.com läuft (Logs checken)
+→ Stelle sicher dass kein anderer Prozess den gleichen Token nutzt
+
+Problem: "Error: relation does not exist"
+→ SQL-Schema wurde nicht ausgeführt. Gehe zurück zu TEIL 3.
+
+Problem: Bilder werden nicht angezeigt
+→ Bilder werden als Telegram file_id gespeichert.
+  file_ids sind bot-spezifisch und funktionieren nur mit dem
+  gleichen Bot-Token. Bei Token-Wechsel müssen Bilder neu hochgeladen werden.
+
+Problem: "Fehler beim Löschen" bei Produkten
+→ Prüfe ob die pending_approvals Tabelle existiert.
+→ Stelle sicher dass du Version 0.5.65+ verwendest (Regex-Bug-Fix).
+
+=========================================
+ VERSIONSHISTORIE
+=========================================
+
+v0.5.65 – Produkt-Löschen Fix
+  • Kritischer Regex-Overlap-Bug behoben (admin_del_prod_ vs admin_del_prod_confirm_)
+  • Robustere deleteProduct-Funktion (löscht abhängige approvals, carts vor dem Produkt)
+
+v0.5.64 – Finales Bild-System
+  • Kompletter Rewrite der Media Engine
+  • editMessageMedia für flicker-freie Übergänge
+  • Automatischer Parse-Mode-Fallback (Markdown → HTML → Plain)
+  • Caption-Truncation auf 1024 Zeichen
+
+v0.5.63 – Robustes Media-Upload-System
+  • file_id-basierter Upload mit Typ-Präfix (photo:/animation:/video:)
+  • Validierung über getFile API
+  • Retry-Logik mit Rate-Limit-Handling
+
+v0.5.6 – Deliverables Tresor & Einzel-Bestellübersicht
+  • Kunden-Befehle: /myorders, /feedbacks
+  • Digitale Lieferungen dauerhaft abrufbar über Tresor
+  • Replace-Anfragen für digitale Artikel
+  • Master Deliverables Tresor
+
+v0.5.0 – Feedback-System & Command-Refactoring
+  • Sterne-Bewertungen (1-5) mit Kommentar
+  • Anonymitäts-Option
+  • Freigabe-Workflow für Feedbacks
+  • /allorders und /allopenorders Befehle
+
+v0.4.x – Bestellsystem, Lieferoptionen, Smart Cleaning
+v0.3.x – Hierarchische Admin-Verwaltung, Unterkategorien

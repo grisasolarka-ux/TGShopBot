@@ -163,7 +163,7 @@ const deleteProduct = async (id) => {
 
     // Schritt 2: Ausstehende Freigaben (approvals) entfernen
     try {
-        await supabase.from('approvals').delete().eq('target_id', id).eq('status', 'pending');
+        await supabase.from('pending_approvals').delete().eq('target_id', id).eq('status', 'pending');
     } catch (approvalError) {
         console.warn(`[productRepo] Warnung: Konnte approvals für Produkt ${id} nicht löschen:`, approvalError.message);
     }
