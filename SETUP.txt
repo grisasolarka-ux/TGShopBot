@@ -57,9 +57,6 @@ des Shop Bots von Null auf Hundert.
      SUPABASE_KEY       = (Dein Service Role Key)
      MASTER_ADMIN_ID    = (Deine Telegram ID)
 
-   HINWEIS: Die Bot-Version wird automatisch aus version.txt gelesen.
-   Die Variable VERSION muss NICHT gesetzt werden.
-
 =========================================
  TEIL 3: DATENBANK-SCHEMA INSTALLIEREN
 =========================================

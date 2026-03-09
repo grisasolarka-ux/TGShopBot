@@ -163,6 +163,17 @@ module.exports = {
         `⚠️ *Bitte sende deine Adresse als Privnote-Link!*\n\n` +
         `_Klartext-Adressen werden aus Sicherheitsgründen nicht akzeptiert._`,
 
+    getDeliveryChoicePrompt: () =>
+        `🚚 *Liefermethode wählen*\n\n` +
+        `Dieses Produkt bietet dir zwei Optionen.\n` +
+        `Bitte wähle deine bevorzugte Liefermethode:`,
+
+    getShippingPlaintextWarning: () =>
+        `⚠️ *Klartext-Adressen sind nicht erlaubt!*\n\n` +
+        `Bitte sende deine Adresse als *Privnote-Link*.\n` +
+        `Erstelle einen auf [privnote.com](https://privnote.com) und sende den Link hier.\n\n` +
+        `_Deine letzte Nachricht wurde aus Sicherheitsgründen gelöscht._`,
+
     getMyOrdersHeader: () => `📋 *Meine Bestellungen*\n\nHier siehst du den aktuellen Stand:`,
     getMyOrdersEmpty: () => `📋 *Meine Bestellungen*\n\nDu hast aktuell keine aktiven Bestellungen.`,
 
@@ -177,6 +188,24 @@ module.exports = {
     getBanMasterError: () => `❌ Der Master-Admin kann nicht gesperrt werden.`,
     getBanAlreadyBanned: () => `⚠️ Dieser User ist bereits gesperrt.`,
     getBanConfirmation: (userId) => `✅ User \`${userId}\` wurde gesperrt und benachrichtigt.`,
+
+    getBanConfirmed: (userId) =>
+        `🔨 *Ban auto-bestätigt*\n\n` +
+        `User \`${userId}\` wurde nach 48h automatisch bestätigt und die Daten gelöscht.`,
+
+    getMasterBanNotify: (data) =>
+        `🔨 *Neuer Ban*\n\n` +
+        `👤 User: \`${data.userId}\`\n` +
+        `🛡 Gebannt von: \`${data.bannedBy}\`\n` +
+        `🕐 Zeit: ${data.time}\n\n` +
+        `_Der Ban wird nach 48h automatisch bestätigt, falls du nicht reagierst._`,
+
+    getOrderReceipt: (data) =>
+        `🧾 *Bestellbestätigung*\n\n` +
+        `📋 Bestellung: \`#${data.orderId}\`\n` +
+        `💰 Summe: ${data.total}€\n` +
+        `💳 Zahlung: ${data.paymentName}\n\n` +
+        `Vielen Dank für deine Bestellung!`,
 
     getAdminPingNotify: (data) =>
         `🔔 *KUNDEN-PING*\n\n👤 ${data.username}\n📋 /${data.orderId}\n\nDer Kunde wartet auf ein Update!`,
