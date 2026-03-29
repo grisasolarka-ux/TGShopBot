@@ -194,10 +194,20 @@ const setDeliveryOption = async (productId, option) => {
     return data[0];
 };
 
+const updateProductDescription = async (productId, description) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ description: description })
+        .eq('id', productId)
+        .select('id, description');
+    if (error) throw error;
+    return data[0];
+};
+
 module.exports = {
     getActiveCategories, addCategory, renameCategory, deleteCategory,
     updateCategorySortOrder, getProductsByCategory, getProductsBySubcategory,
     getProductById, addProduct, deleteProduct,
     toggleProductStatus, updateProductCategory, updateProductImage, updateProductPrice,
-    updateProductName, updateProductSortOrder, setDeliveryOption
+    updateProductName, updateProductSortOrder, setDeliveryOption, updateProductDescription
 };

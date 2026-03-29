@@ -1,6 +1,5 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
-const uiHelper = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
@@ -12,12 +11,30 @@ const cleanup = async (ctx) => {
     }
 };
 
-const addCategoryScene = new Scenes.WizardScene(
-    'addCategoryScene',
+const backToProduct = async (ctx) => {
+    await cleanup(ctx);
+    const productId = ctx.wizard.state.productId;
+    ctx.update.callback_query = { data: `admin_edit_prod_${productId}`, from: ctx.from };
+    return ctx.scene.leave();
+};
+
+const editDescriptionScene = new Scenes.WizardScene(
+    'editDescriptionScene',
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
-        ctx.wizard.state.lastQuestion = '📂 *Neue Kategorie*\n\nBitte sende mir jetzt den **Namen** der neuen Kategorie:';
-        
+        const productId = ctx.scene.state.productId;
+        const product = await productRepo.getProductById(productId);
+
+        ctx.wizard.state.productId = productId;
+
+        const currentDesc = product.description
+            ? `Aktuelle Beschreibung:\n_${product.description}_\n\n`
+            : `_Noch keine Beschreibung vorhanden._\n\n`;
+
+        ctx.wizard.state.lastQuestion =
+            `📝 *Beschreibung bearbeiten*\n\n${currentDesc}` +
+            `Sende die neue Beschreibung.\nOder sende *-* um die Beschreibung zu entfernen.`;
+
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
@@ -25,40 +42,46 @@ const addCategoryScene = new Scenes.WizardScene(
             }
         });
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
+
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
-            await cleanup(ctx);
-            await ctx.scene.leave();
-            return;
+            return backToProduct(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
-        
+
         const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte sende erst den Kategorienamen oder klicke auf Abbrechen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return; 
+            return;
         }
-        
+
+        // "-" = Beschreibung löschen
+        const newDescription = input === '-' ? null : input;
+
         try {
-            await productRepo.addCategory(input);
+            await productRepo.updateProductDescription(ctx.wizard.state.productId, newDescription);
             await cleanup(ctx);
-            await ctx.reply(texts.getCategoryCreated(input), { parse_mode: 'Markdown' });
-            return ctx.scene.leave();
+
+            const confirmText = newDescription
+                ? `✅ Beschreibung aktualisiert.`
+                : `✅ Beschreibung entfernt.`;
+            await ctx.reply(confirmText, { parse_mode: 'Markdown' });
+
+            return backToProduct(ctx);
         } catch (error) {
-            console.error('AddCategory Error:', error.message);
+            console.error('EditDescription Error:', error.message);
             await cleanup(ctx);
             await ctx.reply(texts.getGeneralError());
             return ctx.scene.leave();
@@ -66,10 +89,9 @@ const addCategoryScene = new Scenes.WizardScene(
     }
 );
 
-addCategoryScene.action('cancel_scene', async (ctx) => {
+editDescriptionScene.action('cancel_scene', async (ctx) => {
     await ctx.answerCbQuery('Abgebrochen');
-    await cleanup(ctx);
-    await ctx.scene.leave();
+    return backToProduct(ctx);
 });
 
-module.exports = addCategoryScene;
+module.exports = editDescriptionScene;

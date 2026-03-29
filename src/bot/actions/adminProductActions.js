@@ -185,6 +185,14 @@ module.exports = (bot) => {
         } catch (error) { console.error('admin_img error:', error.message); }
     });
 
+    // ─── BESCHREIBUNG BEARBEITEN ──────────────────────────────────────────────
+    bot.action(/^admin_desc_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('editDescriptionScene', { productId: ctx.match[1] });
+        } catch (error) { console.error('admin_desc error:', error.message); }
+    });
+
     // ─── SORTIERUNG ──────────────────────────────────────────────────────────
     bot.action(/^admin_sort_prod_(up|down)_(.+)$/, isAdmin, async (ctx) => {
         try {

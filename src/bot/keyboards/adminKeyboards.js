@@ -114,6 +114,7 @@ module.exports = {
             [{ text: `🚚 Lieferoption: ${deliveryLabel}`, callback_data: `admin_cycle_delivery_${product.id}` }],
             [{ text: '💰 Preis ändern', callback_data: `admin_price_${product.id}` }],
             [{ text: '✏️ Umbenennen', callback_data: `admin_rename_prod_${product.id}` }],
+            [{ text: '📝 Beschreibung bearbeiten', callback_data: `admin_desc_${product.id}` }],
             [{ text: '🖼 Bild ändern', callback_data: `admin_img_${product.id}` }],
             [
                 { text: '🔼 Nach oben', callback_data: `admin_sort_prod_up_${product.id}` },

@@ -30,6 +30,7 @@ const askQuantityScene = require('./bot/scenes/askQuantityScene');
 const editPriceScene = require('./bot/scenes/editPriceScene');
 const broadcastScene = require('./bot/scenes/broadcastScene');
 const editProductImageScene = require('./bot/scenes/editProductImageScene');
+const editDescriptionScene = require('./bot/scenes/editDescriptionScene');
 const addPaymentMethodScene = require('./bot/scenes/addPaymentMethodScene');
 const checkoutScene = require('./bot/scenes/checkoutScene');
 const contactScene = require('./bot/scenes/contactScene');
@@ -68,6 +69,7 @@ const stage = new Scenes.Stage([
     editPriceScene,
     broadcastScene,
     editProductImageScene,
+    editDescriptionScene,
     addPaymentMethodScene,
     checkoutScene,
     contactScene,
