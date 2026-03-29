@@ -1,45 +1,45 @@
 /**
- * keepAlive.js – v0.6.2
+ * keepAlive.js – v0.6.3
  *
- * Schlankes, zuverlässiges Keep-Alive System für TGShopBot auf Render.com.
+ * Keep-Alive System für TGShopBot auf Render.com Free Tier.
  *
- * ─── WARUM DER RÜCKBAU VON v0.6.1 ────────────────────────────────────────
- * v0.6.1 führte einen Update-Watchdog ein, der process.exit(1) auslöst,
- * wenn länger als 30min kein Telegram-Update einkam. Das klingt schlau,
- * hat aber in der Praxis nach 3-4 Tagen zu stillen Abstürzen geführt:
+ * ─── PROBLEM: RENDER SIGTERM NACH NEUSTART ────────────────────────────────
+ * Render.com sendet SIGTERM in zwei Fällen:
+ *   1. Bei Deploys (erwartet, unkritisch)
+ *   2. Wenn der Dienst nach einem Neustart nicht schnell genug als "aktiv"
+ *      erkannt wird → Render skaliert ihn sofort wieder herunter.
  *
- * - In ruhigen Nächten kommen tatsächlich 30+ Min keine Updates.
- * - Der Watchdog interpretiert das als "silent polling death" → Neustart.
- * - Beim Neustart schließt Node.js alle Sockets → "Server wurde geschlossen"
- *   Meldungen in den Logs.
- * - Render.com startet den Container neu, aber das passiert unnötig.
+ * Das passiert weil nach einem Neustart der erste UptimeRobot-Ping bis zu
+ * 5 Minuten auf sich warten lässt. In dieser Zeit sieht Render keinen
+ * eingehenden Traffic → Cold Start → SIGTERM.
  *
- * ─── DIE ZUVERLÄSSIGE LÖSUNG ──────────────────────────────────────────────
- * Wir verlassen uns auf das bewährte System:
+ * ─── LÖSUNG v0.6.3 ────────────────────────────────────────────────────────
+ * 1. SOFORT-PING beim Start: Sobald der Bot läuft, pingt er sich selbst.
+ *    Das signalisiert Render sofort Aktivität, ohne auf UptimeRobot zu warten.
  *
- * 1. HEALTH SERVER: Einfacher HTTP-Server auf PORT. Antwortet mit 200 OK.
- *    UptimeRobot pingt diesen alle 5 Minuten → kein Cold Start auf Render.
+ * 2. SELF-PING alle 4 Minuten: Hält den Container aktiv (< 5min Grenze).
+ *    UptimeRobot dient als externe Absicherung, ist aber nicht mehr alleinig.
  *
- * 2. TELEGRAM HEARTBEAT: Alle 4 Minuten getMe() aufrufen.
- *    3x hintereinander fehlgeschlagen → process.exit(1).
- *    Das erkennt echte Telegram-Verbindungsausfälle zuverlässig.
+ * 3. TELEGRAM HEARTBEAT alle 4 Minuten: Echte Telegram-Ausfälle erkennen.
+ *    3x hintereinander fehlgeschlagen → process.exit(1) für Container-Restart.
  *
- * Kein Update-Watchdog. Kein Self-Ping. Keine unnötigen Neustarts.
- * UptimeRobot übernimmt das Aufwecken – das hat historisch am besten
- * funktioniert.
+ * Kein Update-Watchdog. Keine falschen Neustarts bei inaktiven Nächten.
  */
 
-const http = require('http');
+const http  = require('http');
+const https = require('https');
 
 // ─── KONFIGURATION ────────────────────────────────────────────────────────
 
-const HEARTBEAT_INTERVAL = 4 * 60 * 1000;  // 4min – Telegram API Check
-const MAX_FAILURES       = 3;               // 3x Heartbeat fehlt → Neustart
+const HEARTBEAT_INTERVAL = 4 * 60 * 1000;   // 4min – Telegram API Check
+const SELF_PING_INTERVAL = 4 * 60 * 1000;   // 4min – Render Cold-Start Prevention
+const MAX_FAILURES       = 3;                // 3x Heartbeat fehlt → Neustart
 
 // ─── STATE ────────────────────────────────────────────────────────────────
 
 let bot             = null;
 let heartbeatTimer  = null;
+let selfPingTimer   = null;
 let failureCount    = 0;
 let lastHeartbeat   = Date.now();
 let totalHeartbeats = 0;
@@ -50,8 +50,8 @@ const startTime     = Date.now();
 const heartbeat = async () => {
     try {
         await bot.telegram.getMe();
-        failureCount   = 0;
-        lastHeartbeat  = Date.now();
+        failureCount  = 0;
+        lastHeartbeat = Date.now();
         totalHeartbeats++;
     } catch (error) {
         failureCount++;
@@ -66,6 +66,22 @@ const heartbeat = async () => {
             setTimeout(() => process.exit(1), 1000);
         }
     }
+};
+
+// ─── SELF-PING: Render Cold-Start Prevention ──────────────────────────────
+
+const selfPing = () => {
+    const url = process.env.RENDER_EXTERNAL_URL || process.env.SELF_PING_URL;
+    if (!url) return;
+
+    const pingUrl = url.replace(/\/$/, '') + '/health';
+    const client  = pingUrl.startsWith('https') ? https : http;
+
+    const req = client.get(pingUrl, (res) => {
+        res.resume(); // Response konsumieren → kein Memory Leak
+    });
+    req.on('error', () => { /* Self-Ping Fehler sind nicht kritisch */ });
+    req.setTimeout(10000, () => req.destroy());
 };
 
 // ─── HEALTH STATUS ────────────────────────────────────────────────────────
@@ -105,7 +121,7 @@ const createServer = (port) => {
     });
 
     server.listen(port, '0.0.0.0', () => {
-        console.log(`[KeepAlive] Health-Server auf Port ${port} – UptimeRobot pingt diesen alle 5min`);
+        console.log(`[KeepAlive] Health-Server auf Port ${port}`);
     });
 
     return server;
@@ -116,22 +132,32 @@ const createServer = (port) => {
 const start = (botInstance) => {
     bot = botInstance;
 
+    // Heartbeat starten
     heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
     heartbeat(); // Sofort einmal prüfen
 
+    // Self-Ping starten – sofort + alle 4 Minuten
+    if (process.env.RENDER_EXTERNAL_URL || process.env.SELF_PING_URL) {
+        selfPing(); // Sofortiger Ping nach Neustart → signalisiert Render Aktivität
+        selfPingTimer = setInterval(selfPing, SELF_PING_INTERVAL);
+        console.log(`[KeepAlive] Self-Ping aktiv – sofortiger Start-Ping gesendet, danach alle ${SELF_PING_INTERVAL / 60000}min`);
+    } else {
+        console.log(`[KeepAlive] Self-Ping deaktiviert (RENDER_EXTERNAL_URL nicht gesetzt)`);
+    }
+
     console.log(
-        `[KeepAlive] Watchdog v0.6.2 gestartet ` +
+        `[KeepAlive] Watchdog v0.6.3 gestartet ` +
         `(Heartbeat: ${HEARTBEAT_INTERVAL / 60000}min, MaxFailures: ${MAX_FAILURES})`
     );
 };
 
 const stop = () => {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (selfPingTimer)  clearInterval(selfPingTimer);
     console.log('[KeepAlive] Watchdog gestoppt.');
 };
 
-// notifyUpdate bleibt als leere Stub-Funktion damit index.js nicht
-// angepasst werden muss (rückwärtskompatibel).
+// notifyUpdate als leere Stub-Funktion (rückwärtskompatibel mit index.js)
 const notifyUpdate = () => {};
 
 module.exports = {

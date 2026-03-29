@@ -43,7 +43,7 @@ const keepAlive = require('./services/keepAlive');
 
 const { checkBan } = require('./bot/middlewares/auth');
 
-// ─── HEALTH SERVER (Smart Endpoint statt blindem 200) ────────────────────
+// ─── HEALTH SERVER ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 10000;
 const server = keepAlive.createServer(PORT);
 
@@ -80,9 +80,6 @@ const stage = new Scenes.Stage([
 bot.use(session());
 bot.use(stage.middleware());
 bot.use(checkBan);
-
-// Update-Watchdog: Jeden eingehenden Update tracken
-// So erkennt keepAlive.js "silent polling death" zuverlässig
 bot.use((ctx, next) => {
     keepAlive.notifyUpdate();
     return next();
@@ -106,51 +103,66 @@ masterActions(bot);
 orderActions(bot);
 customerActions(bot);
 
-// ─── BOT STARTEN mit Retry ──────────────────────────────────────────────
+// ─── BOT STARTEN mit exponentiellem Backoff ──────────────────────────────
+// Verhindert Hammering der Telegram API bei wiederholten Verbindungsfehlern.
+let retryDelay = 5000;
+const MAX_RETRY_DELAY = 60000;
+
 const startBot = () => {
     bot.launch().then(() => {
+        retryDelay = 5000; // Reset nach erfolgreichem Start
         console.log(`Bot v${config.VERSION} started`);
         cronService.start(3600000);
-        // Watchdog starten NACHDEM der Bot läuft
         keepAlive.start(bot);
     }).catch((error) => {
-        console.error('Telegram Connection Error:', error.message);
-        setTimeout(startBot, 5000);
+        console.error(`Telegram Connection Error: ${error.message} – Retry in ${retryDelay / 1000}s`);
+        setTimeout(() => {
+            retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+            startBot();
+        }, retryDelay);
     });
 };
 
 startBot();
 
-// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────────
+// ─── GRACEFUL SHUTDOWN ───────────────────────────────────────────────────
 // Render.com sendet SIGTERM bei Deploys und Scale-Downs.
-// Wir stoppen sauber und lassen Render den Container neu starten.
+// Wir räumen auf und beenden sauber. Render startet danach automatisch neu.
+let shuttingDown = false;
+
 const shutdown = (signal) => {
+    if (shuttingDown) return; // Doppelten Shutdown verhindern
+    shuttingDown = true;
+
     console.log(`[Shutdown] ${signal} empfangen, fahre herunter...`);
     keepAlive.stop();
     cronService.stop();
     bot.stop(signal);
+
+    // Server schließen mit Timeout-Absicherung
+    const forceExit = setTimeout(() => {
+        console.log('[Shutdown] Timeout – harter Abbruch.');
+        process.exit(0);
+    }, 5000);
+    forceExit.unref(); // Verhindert dass der Timer den Prozess offen hält
+
     server.close(() => {
         console.log('[Shutdown] Server geschlossen.');
+        clearTimeout(forceExit);
         process.exit(0);
     });
-    // Falls server.close() hängt, nach 5s hart beenden
-    setTimeout(() => process.exit(0), 5000);
 };
 
-process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGINT',  () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
-// ─── CRASH PROTECTION ───────────────────────────────────────────────────
-// Bei unkritischen Fehlern: loggen und weiterlaufen.
-// Bei kritischen Fehlern: Prozess beenden für Container-Restart.
+// ─── CRASH PROTECTION ────────────────────────────────────────────────────
 process.on('uncaughtException', (err) => {
     console.error('[FATAL] Uncaught Exception:', err.message);
     console.error(err.stack);
-    // Kurze Verzögerung damit der Log geschrieben wird
     setTimeout(() => process.exit(1), 2000);
 });
 
 process.on('unhandledRejection', (reason) => {
     console.error('[WARN] Unhandled Rejection:', reason);
-    // Unhandled Rejections sind meistens nicht fatal → weiterlaufen
 });
